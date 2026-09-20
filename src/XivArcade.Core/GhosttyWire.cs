@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -36,7 +37,7 @@ public static class GhosttyWire
             var error = root.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String ? e.GetString() : null;
             return string.IsNullOrEmpty(error) ? "ghostty refused the call" : error;
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException)
         {
             return "reply is not JSON";
         }

@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json;
 
 namespace XivArcade.Core.Arcade;
@@ -126,7 +127,7 @@ public sealed record ArcadeState
                 Last = NullStr(r, "last"),
             };
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException)
         {
             return Empty;
         }

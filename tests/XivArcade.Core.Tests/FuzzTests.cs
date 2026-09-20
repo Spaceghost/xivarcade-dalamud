@@ -23,6 +23,16 @@ public sealed class FuzzTests
     private static readonly string[] Splices = ["null", "{}", "[]", "\"\"", "-1", "1e999", "99999999999999999999", "\"\\ud800\"", "true", "\u0000", "}", "[", "\"", ",", "\n", "ff", "xii", " "];
 
     [Fact]
+    public void ABrokenSurrogateInAKeyIsJustBadJson()
+    {
+        // Found by the fuzzer on the first release run: System.Text.Json throws
+        // InvalidOperationException, not JsonException, when a name holds a lone surrogate.
+        var text = Encoding.UTF8.GetString(Convert.FromBase64String("eyJcdWQ4MDAiOmZhbHNlLCJlcnJvciI6Im5vIn0="));
+        _ = ArcadeState.Parse(text);
+        _ = ArcadeRequest.Parse(text);
+    }
+
+    [Fact]
     public void ParsersNeverThrow()
     {
         var seed = int.TryParse(Environment.GetEnvironmentVariable("XIVARCADE_FUZZ_SEED"), out var s) ? s : Environment.TickCount;

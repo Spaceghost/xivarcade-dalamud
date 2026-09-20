@@ -13,6 +13,12 @@ Statuses mean the same thing in every one of these mods:
 * **BETA** — merged, but not yet verified in game.
 * **SOON** — still being built.
 
+## [Unreleased] — In the workshop
+
+Merged, not in a release yet.
+
+* A state file or message with a broken character in it is treated as bad data instead of crashing the parser. Found by the project's own fuzz test on the first release run.
+
 ## [0.1.0] — Released 2026-09-20
 
 BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.
