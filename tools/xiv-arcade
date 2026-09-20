@@ -5,7 +5,8 @@ Indexes the game files YOU put in your games folder, starts them in RetroArch, a
 battery save and save state in one directory tree that Syncthing replicates between your machines.
 
 It never downloads, links to or searches for ROMs, disc images or BIOS files. Bring your own dumps
-of games you own. Python 3.9+, standard library only; runs with or without the game.
+of games you own. The one thing it can fetch, and only after you turn it on, is cover art for games
+already in your library (see "art"). Python 3.9+, standard library only; runs with or without the game.
 
   xiv-arcade setup            create the folders, READMEs, RetroArch overrides and the database
   xiv-arcade scan             re-index the games folder
@@ -21,6 +22,7 @@ of games you own. Python 3.9+, standard library only; runs with or without the g
   xiv-arcade emulator [CONSOLE|GAME [CHOICE]]   show or choose the emulator (auto, retroarch:<core>, pcsx2, ...)
   xiv-arcade bios             which BIOS files your emulators read, where, and whether yours are correct
   xiv-arcade paths            every directory in use
+  xiv-arcade art [on|off|refresh]   opt-in cover art for your own games (off by default; says what it contacts)
 """
 from __future__ import annotations
 
@@ -885,6 +887,7 @@ CREATE TABLE IF NOT EXISTS plays (
   id INTEGER PRIMARY KEY, game_id TEXT NOT NULL, core TEXT, started REAL NOT NULL, ended REAL, exit_code INTEGER);
 CREATE INDEX IF NOT EXISTS plays_game ON plays(game_id, started);
 CREATE TABLE IF NOT EXISTS sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS art (game_id TEXT PRIMARY KEY, status TEXT NOT NULL, name TEXT NOT NULL, at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS conflicts (
   id INTEGER PRIMARY KEY, live TEXT NOT NULL, kept_as TEXT NOT NULL, live_mtime REAL, kept_mtime REAL, at REAL NOT NULL);
 """
@@ -957,6 +960,23 @@ class Index:
     def get_state(self, key: str, default=None):
         r = self.db.execute("SELECT value FROM sync_state WHERE key = ?", (key,)).fetchone()
         return json.loads(r["value"]) if r else default
+
+    def set_art(self, gid: str, status: str, name: str) -> None:
+        with self.db:
+            self.db.execute("INSERT INTO art (game_id, status, name, at) VALUES (?,?,?,?) ON CONFLICT(game_id) DO UPDATE SET "
+                            "status=excluded.status, name=excluded.name, at=excluded.at", (gid, status, name, time.time()))
+
+    def art_status(self, gid: str) -> str | None:
+        r = self.db.execute("SELECT status FROM art WHERE game_id = ?", (gid,)).fetchone()
+        return r["status"] if r else None
+
+    def forget_art_misses(self) -> None:
+        with self.db:
+            self.db.execute("DELETE FROM art WHERE status != 'hit'")
+
+    def set_boxart(self, gid: str, path: str) -> None:
+        with self.db:
+            self.db.execute("UPDATE games SET boxart = ? WHERE id = ?", (path, gid))
 
     def add_conflict(self, c: "Resolved") -> None:
         with self.db:
@@ -1230,9 +1250,292 @@ def _add(env: Env, found: dict, sid: str, title: str, files: list[str], rec: dic
                 platform = rec["platform"] if rec else next((p for p in first.relative_to(lbroot).parts if platform_system(p)), "")
                 art = images.find(platform, rec["lb_id"] if rec else "", title, first.stem, strip_disc(first.stem))
                 break
+    if art is None:     # the player's own pictures always win; a cover fetched earlier comes last
+        art = fetched_art(env, sid, gid)
     found[gid] = {"id": gid, "title": title, "sort_title": rec["sort_title"] if rec else title,
                   "year": rec["year"] if rec else None, "system": sid, "path": path, "discs": discs,
                   "ff": ff_keys(title, sid), "boxart": art}
+
+
+# --------------------------------------------------------------------------------------------
+# Fetched artwork (opt-in): RetroArch's own public thumbnail set, for games already in the library
+# --------------------------------------------------------------------------------------------
+# OFF until the player turns it on. When on, exactly one host is contacted, over HTTPS only, and what is
+# sent is the console's name and the game's name (inside the URL) and nothing else: no file, no hash, no
+# path, no identifier. Only games that are in the library are looked up; the shelf's placeholders never
+# are. The player's own pictures always win. ROMs, disc images and BIOS files are never fetched: the only
+# thing this section can write is a PNG or JPEG under <data>/art/.
+
+ART_HOST = "thumbnails.libretro.com"
+ART_BASE = "https://" + ART_HOST + "/"
+ART_AGENT = "XivArcade-art/1 (xivarcade-dalamud; opt-in cover art for the player's own library)"
+ART_KINDS = ("Named_Boxarts", "Named_Titles", "Named_Snaps")
+ART_MAX_BYTES = 4 * 1024 * 1024
+ART_MAX_INDEX = 24 * 1024 * 1024
+ART_MAX_SIDE = 4096
+ART_TIMEOUT = 15.0
+ART_INTERVAL = 1.0            # seconds between requests
+ART_INDEX_AGE = 30 * 86400
+ART_NOTICE = ("Cover art is fetched from " + ART_HOST + " (RetroArch's own thumbnail set) over HTTPS. Only the console's "
+              "name and the game's name are sent, only for games in your library. Artwork belongs to its owners and is "
+              "fetched only to be shown in your own library. Your own pictures always win.")
+
+# each console's playlist name in libretro-thumbnails
+ART_PLAYLISTS = {
+    "nes": ("Nintendo - Nintendo Entertainment System", "Nintendo - Family Computer Disk System"),
+    "snes": ("Nintendo - Super Nintendo Entertainment System",),
+    "gb": ("Nintendo - Game Boy",),
+    "gbc": ("Nintendo - Game Boy Color",),
+    "gba": ("Nintendo - Game Boy Advance",),
+    "nds": ("Nintendo - Nintendo DS",),
+    "wswan": ("Bandai - WonderSwan Color", "Bandai - WonderSwan"),
+    "psx": ("Sony - PlayStation",),
+    "ps2": ("Sony - PlayStation 2",),
+    "psp": ("Sony - PlayStation Portable",),
+    "genesis": ("Sega - Mega Drive - Genesis",),
+    "n64": ("Nintendo - Nintendo 64",),
+}
+ART_REGIONS = ("(USA)", "(USA, Europe)", "(World)", "(Europe)", "(Japan, USA)", "(Japan)", "(USA) (En,Fr,De)",
+               "(Europe) (En,Fr,De)", "(Europe) (En,Fr,De,Es,It)")
+_ART_UNWANTED = re.compile(r"\((?:beta|proto|demo|sample|pirate|unl|kiosk|debug)[^)]*\)", re.I)
+
+
+def art_name(name: str) -> str:
+    """libretro's thumbnail file name for a game name: these characters become an underscore."""
+    return re.sub(r'[&*/:`<>?\\|"]', "_", name)
+
+
+def art_url(playlist: str, kind: str, name: str = "") -> str:
+    from urllib.parse import quote
+    return ART_BASE + quote(playlist) + "/" + kind + "/" + (quote(art_name(name) + ".png") if name else "")
+
+
+def art_candidates(game: dict) -> list[str]:
+    """The names to look for, best first: the player's file name (No-Intro and Redump names already are the
+    thumbnail's name), that name without its disc, the cleaned title, then the title with each usual region."""
+    first = Path((game.get("discs") or [game["path"]])[0]).stem
+    names = [first, strip_disc(first), game["title"], *(f"{game['title']} {r}" for r in ART_REGIONS)]
+    return list(dict.fromkeys(art_name(n.strip()) for n in names if n.strip()))
+
+
+def art_match(candidates: list[str], title: str, names: list[str]) -> str | None:
+    """A candidate that is in the console's index; failing that the index entry whose title is the same once
+    tags, case and numerals are set aside; failing that a near-identical title. Betas, demos and samples lose."""
+    import difflib
+    have = {n.lower(): n for n in names}
+    for c in candidates:
+        if c.lower() in have:
+            return have[c.lower()]
+    by_title: dict[str, list[str]] = {}
+    for n in names:
+        by_title.setdefault(normalize(_TAGS.sub("", n)), []).append(n)
+
+    def best(group: list[str]) -> str:
+        def rank(n: str):
+            region = next((i for i, r in enumerate(ART_REGIONS) if r.lower() in n.lower()), len(ART_REGIONS))
+            return (bool(_ART_UNWANTED.search(n)), region, len(n), n)
+        return min(group, key=rank)
+
+    want = normalize(_TAGS.sub("", title))
+    if want in by_title:
+        return best(by_title[want])
+    close = difflib.get_close_matches(want, list(by_title), n=1, cutoff=0.92) if want else []
+    return best(by_title[close[0]]) if close else None
+
+
+def image_kind(data: bytes) -> str | None:
+    """".png" or ".jpg" when the bytes really are that picture at a sane size, else None. Remote content is
+    judged by what it is, never by its name or its Content-Type."""
+    if len(data) > ART_MAX_BYTES:
+        return None
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR" and len(data) >= 33:
+        w, h = int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+        return ".png" if 0 < w <= ART_MAX_SIDE and 0 < h <= ART_MAX_SIDE and data[-12:-8] == b"\x00\x00\x00\x00" and data[-8:-4] == b"IEND" else None
+    if data[:3] == b"\xff\xd8\xff" and data[-2:] == b"\xff\xd9":
+        i = 2
+        while i + 9 < len(data):
+            if data[i] != 0xFF:
+                return None
+            marker, size = data[i + 1], int.from_bytes(data[i + 2:i + 4], "big")
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                h, w = int.from_bytes(data[i + 5:i + 7], "big"), int.from_bytes(data[i + 7:i + 9], "big")
+                return ".jpg" if 0 < w <= ART_MAX_SIDE and 0 < h <= ART_MAX_SIDE else None
+            if size < 2:
+                return None
+            i += 2 + size
+    return None
+
+
+class _ArtRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith(ART_BASE):
+            raise urllib.error.HTTPError(newurl, code, "redirect away from " + ART_HOST + " refused", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def art_get(url: str, limit: int) -> bytes | None:
+    """One polite GET. HTTPS to the one host or nothing; a timeout; never more than `limit` bytes. None on any failure."""
+    if not url.startswith(ART_BASE):
+        return None
+    try:
+        opener = urllib.request.build_opener(_ArtRedirects)
+        with opener.open(urllib.request.Request(url, headers={"User-Agent": ART_AGENT}), timeout=ART_TIMEOUT) as r:
+            if r.status != 200 or not r.geturl().startswith(ART_BASE):
+                return None
+            data = r.read(limit + 1)
+            return data if len(data) <= limit else None
+    except (OSError, ValueError, urllib.error.URLError):
+        return None
+
+
+def art_dir(env: Env) -> Path:
+    return env.data / "art"
+
+
+def art_enabled(env: Env) -> bool:
+    return env.settings().get("art_fetch") is True
+
+
+def set_art(env: Env, on: bool) -> None:
+    s = env.settings()
+    s["art_fetch"] = bool(on)
+    atomic_write(env.settings_path, json.dumps(s, indent=2) + "\n")
+
+
+def fetched_art(env: Env, sid: str, gid: str) -> str | None:
+    """A cover fetched earlier for this game. Pictures already on disk stay in use when fetching is turned off:
+    showing them contacts nobody."""
+    for ext in (".png", ".jpg"):
+        p = art_dir(env) / sid / (gid + ext)
+        if p.is_file():
+            return str(p)
+    return None
+
+
+def _is_fetched(env: Env, path: str | None) -> bool:
+    return bool(path) and Path(path).parent.parent == art_dir(env)
+
+
+class ArtFetcher:
+    """Looks up covers for the games in the library, one request a second, and remembers every answer
+    (found or not) so nothing is asked twice. `get`, `sleep` and `clock` are injectable for tests."""
+
+    def __init__(self, env: Env, index: "Index", get=art_get, sleep=time.sleep, clock=time.monotonic, interval: float = ART_INTERVAL):
+        self.env, self.index, self.get, self.sleep, self.clock, self.interval = env, index, get, sleep, clock, interval
+        self.last = None
+        self.requests = 0
+        self.lists: dict[tuple[str, str], list[str] | None] = {}
+
+    def _request(self, url: str, limit: int) -> bytes | None:
+        if not art_enabled(self.env):       # belt and braces: nothing leaves the machine while this is off
+            return None
+        if self.last is not None:
+            wait = self.interval - (self.clock() - self.last)
+            if wait > 0:
+                self.sleep(wait)
+        self.last = self.clock()
+        self.requests += 1
+        return self.get(url, limit)
+
+    def names(self, playlist: str, kind: str) -> list[str] | None:
+        """The console's list of thumbnail names: asked for once, kept for a month."""
+        key = (playlist, kind)
+        if key in self.lists:
+            return self.lists[key]
+        cache = art_dir(self.env) / "index" / (art_name(playlist) + " - " + kind + ".txt")
+        names = None
+        try:
+            if time.time() - cache.stat().st_mtime < ART_INDEX_AGE:
+                names = cache.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            pass
+        if names is None:
+            from html import unescape
+            from urllib.parse import unquote
+            page = self._request(art_url(playlist, kind), ART_MAX_INDEX)
+            if page is not None:
+                hrefs = re.findall(r'href="([^"?/][^"/]*\.png)"', page.decode("utf-8", "replace"))
+                names = [unquote(unescape(h))[:-4] for h in hrefs]
+                atomic_write(cache, "\n".join(names) + "\n")
+        self.lists[key] = names
+        return names
+
+    def find(self, game: dict) -> tuple[str, str, str] | None:
+        candidates = art_candidates(game)
+        for kind in ART_KINDS:
+            for playlist in ART_PLAYLISTS.get(game["system"], ()):
+                names = self.names(playlist, kind)
+                if names and (hit := art_match(candidates, game["title"], names)):
+                    return playlist, kind, hit
+            if all(self.lists.get((p, kind)) is None for p in ART_PLAYLISTS.get(game["system"], ())):
+                return None     # the host cannot be reached: do not guess at names one request at a time
+        return None
+
+    def fetch(self, game: dict) -> str | None:
+        """The path of this game's fetched cover, or None. Every outcome is remembered."""
+        if game["system"] not in ART_PLAYLISTS:
+            return None
+        hit = self.find(game)
+        if hit is None:
+            if any(v is not None for v in self.lists.values()):
+                self.index.set_art(game["id"], "miss", "")
+            return None
+        data = self._request(art_url(hit[0], hit[1], hit[2]), ART_MAX_BYTES)
+        ext = image_kind(data) if data else None
+        if ext is None:
+            self.index.set_art(game["id"], "bad" if data else "miss", hit[2])
+            return None
+        path = art_dir(self.env) / game["system"] / (game["id"] + ext)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name("." + path.name + ".tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+        self.index.set_art(game["id"], "hit", hit[2])
+        return str(path)
+
+    def run(self, on_progress=None) -> dict:
+        """Every game in the library that has no picture of any kind and has not been asked about before."""
+        if not art_enabled(self.env):
+            return {"fetched": 0, "missing": 0, "asked": 0}
+        todo = [g for g in self.index.games() if not g["boxart"] and self.index.art_status(g["id"]) is None]
+        result = {"fetched": 0, "missing": 0, "asked": len(todo)}
+        for n, game in enumerate(todo, 1):
+            if not art_enabled(self.env):   # turned off while running: stop at once
+                break
+            path = self.fetch(game)
+            if path:
+                self.index.set_boxart(game["id"], path)
+            result["fetched" if path else "missing"] += 1
+            if on_progress:
+                on_progress(n, len(todo), game, path)
+        return result
+
+
+def art_lock(env: Env):
+    """Held by the one running fetch. Returns the open file, or None when another fetch holds it."""
+    import fcntl
+    art_dir(env).mkdir(parents=True, exist_ok=True)
+    f = open(art_dir(env) / ".lock", "a+")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return f
+    except OSError:
+        f.close()
+        return None
+
+
+def art_state(env: Env, index: "Index", games: list[dict]) -> dict:
+    running = False
+    if art_dir(env).is_dir():
+        lock = art_lock(env)
+        running = lock is None
+        if lock:
+            lock.close()
+    fetched = sum(1 for g in games if _is_fetched(env, g["boxart"]))
+    without = [g for g in games if not g["boxart"]]
+    waiting = sum(1 for g in without if index.art_status(g["id"]) is None)
+    return {"enabled": art_enabled(env), "running": running, "host": ART_HOST, "notice": ART_NOTICE, "folder": str(art_dir(env)),
+            "fetched": fetched, "without": len(without), "waiting": waiting}
 
 
 def save_stem(filename: str) -> str:
@@ -1710,8 +2013,9 @@ def build_state(env: Env, index: Index, sync, playing: dict | None = None, messa
         "shelf": [{"key": e.key, "title": e.title, "year": e.year, "platforms": e.platforms,
                    "games": [g["id"] for g in games if e.key in g["ff"]]} for e in FF_SHELF],
         "games": [{"id": g["id"], "title": g["title"], "year": g["year"], "system": g["system"], "path": g["path"], "discs": len(g["discs"]),
-                   "ff": g["ff"], "boxart": g["boxart"], "last_played": g["last_played"],
+                   "ff": g["ff"], "boxart": g["boxart"], "boxart_fetched": _is_fetched(env, g["boxart"]), "last_played": g["last_played"],
                    "ready": (per_game[g["id"]] if g["id"] in per_game else chosen[g["system"]]) is not None} for g in games],
+        "art": art_state(env, index, games),
         "last": last["id"] if last else None,
     }
 
@@ -1797,6 +2101,48 @@ def launch(env: Env, index: Index, sync, query: str, dry_run: bool = False, run=
 # Command line
 # --------------------------------------------------------------------------------------------
 
+def art_command(env: Env, index: Index, sync, action: str, get=art_get, sleep=time.sleep) -> int:
+    if action == "on":
+        set_art(env, True)
+    elif action == "off":
+        set_art(env, False)
+    index.replace_library(scan(env))
+    if action == "refresh":
+        index.forget_art_misses()
+        shutil.rmtree(art_dir(env) / "index", ignore_errors=True)
+    if not art_enabled(env):
+        write_state(env, index, sync, message="Cover art fetching is off. Nothing is contacted." if action != "status" else "")
+        print("Cover art fetching is off; nothing is contacted. `xiv-arcade art on` turns it on.\n" + ART_NOTICE
+              + f"\nCovers fetched earlier stay in {art_dir(env)}; delete that folder to remove them.")
+        return 0
+    if action == "status":
+        st = write_state(env, index, sync)["art"]
+        print(f"Cover art fetching is on. {st['fetched']} fetched, {st['waiting']} not looked up yet, "
+              f"{st['without'] - st['waiting']} without a match. `xiv-arcade art refresh` asks again.\n" + ART_NOTICE)
+        return 0
+    lock = art_lock(env)
+    if lock is None:
+        print("A cover art fetch is already running.")
+        return 0
+    try:
+        last = [0.0]
+
+        def progress(n, total, game, path):
+            print(f"[{n}/{total}] {game['title']}: {'fetched' if path else 'no match'}")
+            if path and time.monotonic() - last[0] > 3:
+                last[0] = time.monotonic()
+                write_state(env, index, sync, message=f"Fetching cover art · {n} of {total}")
+
+        write_state(env, index, sync, message="Fetching cover art…")
+        r = ArtFetcher(env, index, get=get, sleep=sleep).run(progress)
+        msg = f"Cover art · {r['fetched']} fetched, {r['missing']} without a match"
+    finally:
+        lock.close()
+    write_state(env, index, sync, message=msg)
+    print(msg)
+    return 0
+
+
 def _apply(commands: list[str], apply: bool) -> int:
     for c in commands:
         print(("$ " if apply else "  ") + c)
@@ -1821,6 +2167,8 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("scan", "state", "list", "last"):
         sub.add_parser(name)
     sub.add_parser("paths", help="every directory in use, and where it came from")
+    p = sub.add_parser("art", help="opt-in cover art from RetroArch's thumbnail set, only for games in your library")
+    p.add_argument("action", nargs="?", choices=("on", "off", "refresh", "status"), default="status")
     sub.add_parser("bios", help="which BIOS files your emulators read, where, and whether yours are correct dumps")
     p = sub.add_parser("emulator", help="show or choose the emulator for a console or for one game")
     p.add_argument("target", nargs="?", help="a console id (ps2, psx, ...) or a game")
@@ -1904,6 +2252,8 @@ def main(argv: list[str] | None = None) -> int:
                 for s in state["sync"]["steps"]:
                     print(f"  - {s['text']}\n      {s['command']}")
             return 0
+        if a.cmd == "art":
+            return art_command(env, index, sync, a.action)
         if a.cmd == "import-saves":
             index.replace_library(scan(env))
             src = Path(a.path).expanduser()

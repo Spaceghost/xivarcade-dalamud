@@ -18,8 +18,9 @@ when [Ghostty for Dalamud](https://github.com/Spaceghost/ghostty-dalamud) and it
 running, shows them as panels in the world. Every battery save and save state lives in one folder
 that Syncthing copies between your machines.
 
-> **Bring your own games.** XivArcade never downloads, links to or helps find ROMs, disc images, BIOS
-> files or artwork. It only reads folders you point it at. Use your own dumps of games you own.
+> **Bring your own games.** XivArcade never downloads, links to or helps find ROMs, disc images or BIOS
+> files. It only reads folders you point it at. Use your own dumps of games you own. Cover art is your
+> own too, unless you turn on the optional, off-by-default fetch described below.
 
 > **Status: experimental, not verified in game.** Host tests cover the library, LaunchBox import,
 > playlists, the emulator command per core, name matching, the save-sync state machine and the IPC
@@ -36,8 +37,12 @@ that Syncthing copies between your machines.
   selected one glowing, a details strip with Play. Type to search, arrows or D-pad, Enter to play, Tab
   changes shelf.
 - Covers are your own files (`<console>/covers/<game name>.png`, `cover.png` in a game's folder, or
-  LaunchBox `Images/`); a game without one gets a drawn cover in its console's box shape. Nothing is
-  downloaded. See [docs/ARCADE.md](docs/ARCADE.md#covers).
+  LaunchBox `Images/`); a game without one gets a drawn cover in its console's box shape. See
+  [docs/ARCADE.md](docs/ARCADE.md#covers).
+- Optional, **off by default**: fetch cover art for the games already in your library from RetroArch's
+  public thumbnail set (`thumbnails.libretro.com`, HTTPS). Only the console's and the game's name are
+  sent. Artwork belongs to its owners and is fetched only for display in your own library. Games, disc
+  images and BIOS files are never fetched.
 - A three-step first run whose checks turn green by themselves, each with one command to copy.
 - A 26-title Final Fantasy shelf of drawn covers that light up as your files appear.
 - LaunchBox libraries copied in as they are: platform folders, `Data/Platforms/*.xml`, `Images/`.

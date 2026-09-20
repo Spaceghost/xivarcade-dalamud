@@ -169,4 +169,28 @@ public sealed class ArcadeTests
     [Fact]
     public void WineStartArguments()
         => Assert.Equal("/unix /usr/bin/env python3 \"/home/user/my games/xiv-arcade\" scan", WineHost.Arguments(["/usr/bin/env", "python3", "/home/user/my games/xiv-arcade", "scan"]));
+
+    [Fact]
+    public void CoverArtIsOffUnlessTheStateSaysOtherwise()
+    {
+        Assert.False(ArcadeState.Parse("{\"at\":1}").Art.Enabled);
+        var art = ArcadeState.Parse("{\"at\":1,\"art\":{\"enabled\":true,\"running\":true,\"host\":\"thumbnails.libretro.com\",\"fetched\":3,\"without\":2,\"waiting\":1,\"folder\":\"/d/art\"}}").Art;
+        Assert.Equal((true, true, "thumbnails.libretro.com", 3, 2, 1, "/d/art"), (art.Enabled, art.Running, art.Host, art.Fetched, art.Without, art.Waiting, art.Folder));
+    }
+
+    [Theory]
+    [InlineData("art", "status")]
+    [InlineData("art on", "on")]
+    [InlineData("covers OFF", "off")]
+    [InlineData("art refresh", "refresh")]
+    public void TheArtVerbOnlyTakesItsFourWords(string typed, string arg)
+    {
+        var request = ArcadeRequest.Parse(typed);
+        Assert.Equal((ArcadeVerb.Art, arg), (request.Verb, request.Arg));
+        var call = ArcadeCommands.HelperCall(request)!.Value;
+        Assert.Equal("art", call.Verb);
+        Assert.Equal([arg], call.Args);
+        Assert.Equal(ArcadeVerb.Play, ArcadeRequest.Parse("art of fighting").Verb); // a game, not a switch
+        Assert.Contains("thumbnails.libretro.com", ArcadeText.ArtNotice, StringComparison.Ordinal);
+    }
 }

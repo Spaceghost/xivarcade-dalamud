@@ -164,6 +164,13 @@ public sealed class Plugin : IDalamudPlugin
                 ArcadeVerb.Setup => "checking folders, emulator and games…",
                 ArcadeVerb.Rescan => "rescanning your games folder…",
                 ArcadeVerb.Bios or ArcadeVerb.Paths => "looking again…",
+                ArcadeVerb.Art => request.Arg switch
+                {
+                    "on" => "cover art on: fetching covers for the games in your library. " + ArcadeText.ArtNotice,
+                    "off" => "cover art off: nothing is contacted. Covers already fetched stay on disk.",
+                    "refresh" => "asking again for the covers that had no match…",
+                    _ => (arcade.State.Art.Enabled ? $"cover art is on · {arcade.State.Art.Fetched} fetched, {arcade.State.Art.Without} games without a cover. " : "cover art is off (/arcade art on). ") + ArcadeText.ArtNotice,
+                },
                 ArcadeVerb.Emulator or ArcadeVerb.GamesFolder or ArcadeVerb.SavesFolder => "asked the host; the answer follows",
                 _ => "asked the host; the result follows",
             }

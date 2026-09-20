@@ -21,6 +21,7 @@ public enum ArcadeVerb
     Paths,
     GamesFolder,
     SavesFolder,
+    Art,
 }
 
 /// <summary>What the player typed after /arcade.</summary>
@@ -60,6 +61,8 @@ public sealed record ArcadeRequest(ArcadeVerb Verb, string Arg = "")
                 return new ArcadeRequest(ArcadeVerb.GamesFolder, rest);
             case "saves-folder" when rest.Length > 0:
                 return new ArcadeRequest(ArcadeVerb.SavesFolder, rest);
+            case "art" or "covers" or "boxart" when rest.Length == 0 || rest.ToLowerInvariant() is "on" or "off" or "refresh" or "status":
+                return new ArcadeRequest(ArcadeVerb.Art, rest.Length == 0 ? "status" : rest.ToLowerInvariant());
             case "launchbox":
                 return new ArcadeRequest(ArcadeVerb.LaunchBox, rest);
             case "import-saves" or "importsaves":
@@ -113,6 +116,7 @@ public static class ArcadeCommands
         ArcadeVerb.GamesFolder when request.Arg.Length > 0 => ("setup", ["--games", request.Arg]),
         ArcadeVerb.SavesFolder when request.Arg.Length > 0 => ("setup", ["--saves", request.Arg]),
         ArcadeVerb.Emulator => ("emulator", EmulatorArgs(request.Arg)),
+        ArcadeVerb.Art => ("art", [request.Arg is "on" or "off" or "refresh" ? request.Arg : "status"]),
         _ => null,
     };
 

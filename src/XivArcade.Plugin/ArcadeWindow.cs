@@ -524,7 +524,7 @@ public sealed class ArcadeWindow : Window, IDisposable
         ImGui.SameLine();
         ImGui.TextDisabled("New files show up by themselves while this window is open.");
         ImGui.PushTextWrapPos(Wrap(scale));
-        ImGui.TextDisabled("Covers are your own pictures too: <console>/covers/<game name>.png, cover.png in a game's own folder, or your LaunchBox Images folder. A game without one gets a drawn cover.");
+        ImGui.TextDisabled("Covers are your own pictures: <console>/covers/<game name>.png, cover.png in a game's own folder, or your LaunchBox Images folder. A game without one gets a drawn cover, or, only if you turn it on, a cover fetched from RetroArch's thumbnail set.");
         ImGui.TextDisabled(state.Legal);
         ImGui.PopTextWrapPos();
     }
@@ -923,7 +923,8 @@ public sealed class ArcadeWindow : Window, IDisposable
     {
         var state = arcade.State;
         var folder = state.Systems.FirstOrDefault(s => s.Id == tile.System)?.Folder ?? tile.System;
-        return $"This is a drawn cover. To use your own picture, save it as {state.GamesRoot}/{folder}/covers/{tile.Title}.png (or .jpg), or as cover.png in the game's own folder, then press F5. Nothing is downloaded.";
+        return $"This is a drawn cover. To use your own picture, save it as {state.GamesRoot}/{folder}/covers/{tile.Title}.png (or .jpg), or as cover.png in the game's own folder, then press F5."
+            + (state.Art.Enabled ? "" : " Or press \"Fetch cover art for my games\" below: it is off until you do.");
     }
 
     /// <summary>The glass strip under the wall: everything about the selected game, and the Play button.</summary>
@@ -983,6 +984,36 @@ public sealed class ArcadeWindow : Window, IDisposable
     }
 
 
+    /// <summary>
+    /// Cover art is opt-in. The button says what it will do before it does it, and the helper, not the game,
+    /// does the asking: the plugin never opens a connection.
+    /// </summary>
+    private void DrawArtButton(ArcadeState state)
+    {
+        var art = state.Art;
+        if (!state.Loaded || (art.Without == 0 && !art.Enabled))
+            return;
+        var label = art.Running ? "Fetching cover art…" : !art.Enabled ? "Fetch cover art for my games" : art.Waiting > 0 ? $"Fetch {art.Waiting} more covers" : "Cover art: on";
+        if (ImGui.Button(label + "##art") && !art.Running)
+        {
+            var verb = !art.Enabled || art.Waiting > 0 ? "on" : "off";
+            Flash(Describe(arcade.Run(new ArcadeRequest(ArcadeVerb.Art, verb)), verb == "on" ? "Fetching cover art for the games in your library…" : "Cover art is off. Nothing is contacted."));
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.BeginTooltip();
+            ImGui.PushTextWrapPos(ImGui.GetFontSize() * 28);
+            ImGui.TextUnformatted(ArcadeText.ArtNotice);
+            if (art.Enabled)
+                ImGui.TextDisabled($"{art.Fetched} fetched · {art.Without} games without a cover. Click to turn it off; /arcade art refresh asks again. Fetched covers are kept in {art.Folder}.");
+            ImGui.PopTextWrapPos();
+            ImGui.EndTooltip();
+        }
+
+        ImGui.SameLine();
+    }
+
     private void DrawFooter(ArcadeState state)
     {
         if (ImGui.Button("Rescan"))
@@ -991,6 +1022,7 @@ public sealed class ArcadeWindow : Window, IDisposable
         if (ImGui.Button(showSync ? "Hide save sync" : "Save sync"))
             showSync = !showSync;
         ImGui.SameLine();
+        DrawArtButton(state);
         if (flash != null && DateTime.UtcNow < flashUntil)
         {
             var bad = flash.StartsWith("error", StringComparison.Ordinal);
@@ -1001,7 +1033,9 @@ public sealed class ArcadeWindow : Window, IDisposable
             ImGui.TextDisabled(state.Message.Length > 0 ? state.Message : $"{state.Games.Count} games · saves: {state.Sync.Label}");
         }
 
-        ImGui.TextDisabled("Bring your own games and covers: nothing is downloaded, and only folders you choose are read.");
+        ImGui.TextDisabled(state.Art.Enabled
+            ? "Bring your own games. Cover art is on: only game and console names go to thumbnails.libretro.com. Games and BIOS files are never fetched."
+            : "Bring your own games and covers: nothing is downloaded, and only folders you choose are read.");
     }
 
     private static Vector4 Tone(ArcadeSync sync) => sync.Tone switch

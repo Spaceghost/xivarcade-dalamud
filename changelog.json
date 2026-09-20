@@ -11,6 +11,10 @@
       "items": [
         {
           "status": "beta",
+          "text": "Optional cover art, off by default: \"Fetch cover art for my games\" in the window, or `/arcade art on` (`off`, `refresh`). When on, the helper on your Linux host asks RetroArch's own public thumbnail set (`thumbnails.libretro.com`, HTTPS only) for covers of games that are already in your library, never the Final Fantasy placeholders and never the whole set. Only the console's name and the game's name are sent. Your own pictures always win; fetched covers are kept under `~/.local/share/xiv-arcade/art`, checked to really be PNG or JPEG, asked for once, one request a second, and a miss just leaves the drawn cover. Artwork belongs to its owners and is fetched only for display in your own library. Games, disc images and BIOS files are still never downloaded, linked to or located. Tested against a stand-in host, and the helper was run once against the real one with empty placeholder files; not seen in game."
+        },
+        {
+          "status": "beta",
           "text": "The Arcade window is now a box-art wall instead of text tiles: your own covers in a grid, Final Fantasy first and then a shelf per console, the selected cover growing a little with a gold glow while the rest dim, and a details strip with the title, console, year, discs, last played, save-sync state and a Play button. Arrows or the D-pad move, Enter or confirm plays, typing filters the covers, Tab changes shelf. A game with no picture gets a drawn cover in its console's box shape (spine in the console's colour, fitted title, year, system mark), and the 26 Final Fantasy titles use those, dimmed, until your file and your picture appear. Artwork stays bring-your-own and nothing is downloaded: drop `cover.png` beside a game in its own folder, or `<console>/covers/<game name>.png`, or use your LaunchBox image folders. Pictures load in the background as thumbnails and are released on unload. Host tests cover the layout, the picture cache, title fitting and the lookup order; none of it has been seen in game yet."
         },
         {

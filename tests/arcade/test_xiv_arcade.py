@@ -4,6 +4,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -600,12 +601,171 @@ class ImportSaves(Tree):
         self.assertEqual("Game v1.1 (USA)", xa.save_stem("Game v1.1 (USA).srm"))
 
 
+def _png(w=300, h=420, size=200):
+    body = b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR" + w.to_bytes(4, "big") + h.to_bytes(4, "big") + b"\x08\x06\x00\x00\x00" + b"crc!"
+    return body + b"x" * size + b"\x00\x00\x00\x00IEND\xaeB`\x82"
+
+
+_SNES = "Nintendo - Super Nintendo Entertainment System"
+
+
+class FakeHost:
+    """Stands in for the thumbnail host: a listing per console and kind, and a picture per listed name."""
+
+    def __init__(self, listings, picture=None):
+        self.listings, self.picture, self.urls = listings, picture or _png(), []
+
+    def __call__(self, url, limit):
+        from urllib.parse import unquote
+        self.urls.append(url)
+        assert url.startswith("https://thumbnails.libretro.com/"), url
+        playlist, kind, name = unquote(url[len("https://thumbnails.libretro.com/"):]).split("/", 2)
+        names = self.listings.get((playlist, kind))
+        if names is None:
+            return None
+        if name == "":
+            return ("<html>" + "".join(f'<a href="{xa.art_url(playlist, kind, n).rsplit("/", 1)[1]}">{n}.png</a>' for n in names)
+                    + '<a href="?C=N;O=D">Name</a><a href="/up/">Parent</a></html>').encode()
+        return self.picture if name[:-4] in names else None
+
+
+class Art(Tree):
+    def setUp(self):
+        super().setUp()
+        xa.setup(self.env)
+        self.index = xa.Index(":memory:")
+
+    def library(self):
+        self.index.replace_library(xa.scan(self.env))
+        return {g["title"]: g for g in self.index.games()}
+
+    def fetcher(self, host):
+        return xa.ArtFetcher(self.env, self.index, get=host, sleep=lambda s: None, clock=lambda: 0.0)
+
+    def test_names_use_libretros_substitutions_and_every_console_has_a_playlist(self):
+        self.assertEqual("Ratchet _ Clank_ Going _Commando_", xa.art_name('Ratchet & Clank: Going "Commando"'))
+        self.assertEqual("a_b_c_d_e_f_g_h", xa.art_name("a*b/c`d<e>f?g\\h").replace("|", "_"))
+        self.assertEqual("https://thumbnails.libretro.com/Sony%20-%20PlayStation/Named_Boxarts/Final%20Fantasy%20VII%20%28USA%29%20%28Disc%201%29.png",
+                         xa.art_url("Sony - PlayStation", "Named_Boxarts", "Final Fantasy VII (USA) (Disc 1)"))
+        self.assertEqual({s.id for s in xa.SYSTEMS}, set(xa.ART_PLAYLISTS))
+
+    def test_the_file_name_comes_first_then_the_title_then_regions(self):
+        game = {"path": "/g/psx/Final Fantasy VII (Europe) (Disc 1).chd", "discs": [], "title": "Final Fantasy VII"}
+        c = xa.art_candidates(game)
+        self.assertEqual(["Final Fantasy VII (Europe) (Disc 1)", "Final Fantasy VII (Europe)", "Final Fantasy VII", "Final Fantasy VII (USA)"], c[:4])
+        self.assertIn("Final Fantasy VII (Japan)", c)
+        names = ["Final Fantasy VII (Japan)", "Final Fantasy VII (USA) (Disc 1)", "Final Fantasy VII (Europe) (Disc 1)"]
+        self.assertEqual("Final Fantasy VII (Europe) (Disc 1)", xa.art_match(c, "Final Fantasy VII", names))
+        self.assertEqual("Final Fantasy VII (Japan)", xa.art_match(xa.art_candidates({"path": "/g/ff7.chd", "title": "Final Fantasy VII"}), "Final Fantasy VII", names[:1]))
+
+    def test_region_fallback_and_fuzzy_matching_prefer_a_real_release(self):
+        names = ["Chrono Trigger (USA) (Beta)", "Chrono Trigger (Japan)", "Chrono Trigger (USA)", "Secret of Mana (Europe) (En,Fr,De)"]
+        self.assertEqual("Chrono Trigger (USA)", xa.art_match(["chrono trigger [!]"], "Chrono Trigger", names))
+        self.assertEqual("Secret of Mana (Europe) (En,Fr,De)", xa.art_match(["Secret Of Mana"], "Secret Of Mana", names))
+        self.assertEqual("Chrono Trigger (USA)", xa.art_match(["x"], "Chrono Triger", names))
+        self.assertIsNone(xa.art_match(["x"], "Chrono Cross", names))
+
+    def test_nothing_is_fetched_while_disabled_and_it_is_off_by_default(self):
+        self.touch(self.games / "snes" / "Chrono Trigger (USA).sfc")
+        self.library()
+        host = FakeHost({(_SNES, "Named_Boxarts"): ["Chrono Trigger (USA)"]})
+        self.assertFalse(xa.art_enabled(self.env))
+        self.assertEqual(0, self.fetcher(host).run()["asked"])
+        self.assertIsNone(self.fetcher(host).fetch(self.library()["Chrono Trigger"]))
+        xa.art_command(self.env, self.index, xa.Syncthing(self.env), "refresh", get=host, sleep=lambda s: None)
+        xa.art_command(self.env, self.index, xa.Syncthing(self.env), "status", get=host, sleep=lambda s: None)
+        self.assertEqual([], host.urls)
+        self.assertFalse((self.env.data / "art").exists())
+        state = json.loads(self.env.state_path.read_text())
+        self.assertEqual((False, False, "thumbnails.libretro.com"), (state["art"]["enabled"], state["art"]["running"], state["art"]["host"]))
+
+    def test_only_library_games_are_fetched_once_and_cached(self):
+        self.touch(self.games / "snes" / "Chrono Trigger (USA).sfc")
+        self.touch(self.games / "snes" / "Homebrew Thing.sfc")
+        host = FakeHost({(_SNES, k): ["Chrono Trigger (USA)", "Final Fantasy III (USA)"] for k in xa.ART_KINDS})
+        sync = xa.Syncthing(self.env)
+        xa.art_command(self.env, self.index, sync, "on", get=host, sleep=lambda s: None)
+        games = self.library()
+        art = self.env.data / "art" / "snes" / (games["Chrono Trigger"]["id"] + ".png")
+        self.assertEqual(str(art), games["Chrono Trigger"]["boxart"])
+        self.assertIsNone(games["Homebrew Thing"]["boxart"])
+        pictures = [u for u in host.urls if u.endswith(".png")]
+        self.assertEqual(1, len(pictures), "one picture for the one match: never the shelf, never the whole set")
+        self.assertNotIn("Final%20Fantasy", "".join(pictures))
+        self.assertEqual(4, len(host.urls), "three listings and one picture")
+        state = json.loads(self.env.state_path.read_text())
+        self.assertEqual((True, 1, 1, 0), (state["art"]["enabled"], state["art"]["fetched"], state["art"]["without"], state["art"]["waiting"]))
+        self.assertTrue(next(g for g in state["games"] if g["title"] == "Chrono Trigger")["boxart_fetched"])
+
+        before = list(host.urls)
+        xa.art_command(self.env, self.index, sync, "on", get=host, sleep=lambda s: None)
+        self.assertEqual(before, host.urls, "a cached cover and a remembered miss are never asked for again")
+        xa.art_command(self.env, self.index, sync, "off", get=host, sleep=lambda s: None)
+        self.assertEqual(str(art), self.library()["Chrono Trigger"]["boxart"], "what is on disk stays in use")
+        self.assertEqual(before, host.urls)
+
+    def test_the_players_own_picture_always_wins_over_a_fetched_one(self):
+        rom = self.touch(self.games / "snes" / "Chrono Trigger (USA).sfc")
+        gid = xa.scan(self.env)[0]["id"]
+        fetched = self.touch(self.env.data / "art" / "snes" / (gid + ".png"))
+        self.assertEqual(str(fetched), xa.scan(self.env)[0]["boxart"])
+        own = self.touch(self.games / "snes" / "covers" / "Chrono Trigger.png")
+        self.assertEqual(str(own), xa.scan(self.env)[0]["boxart"])
+        beside = self.touch(rom.with_suffix(".jpg"))
+        self.assertEqual(str(beside), xa.scan(self.env)[0]["boxart"])
+
+    def test_a_bad_response_is_never_written(self):
+        self.assertEqual(".png", xa.image_kind(_png()))
+        self.assertEqual(".jpg", xa.image_kind(b"\xff\xd8\xff\xe0\x00\x04ab\xff\xc0\x00\x0b\x08\x01\x00\x01\x00\x03\x01\xff\xd9"))
+        for bad in (b"", b"<html>404</html>", b"MZ\x90\x00" + b"x" * 64, b"PK\x03\x04rom", _png()[:40], _png(w=99999),
+                    _png(size=xa.ART_MAX_BYTES), b"\xff\xd8\xff\xe0 not really"):
+            self.assertIsNone(xa.image_kind(bad), bad[:12])
+        self.touch(self.games / "snes" / "Chrono Trigger (USA).sfc")
+        xa.set_art(self.env, True)
+        game = self.library()["Chrono Trigger"]
+        host = FakeHost({(_SNES, "Named_Boxarts"): ["Chrono Trigger (USA)"]}, picture=b"<html>not a picture</html>")
+        self.assertIsNone(self.fetcher(host).fetch(game))
+        self.assertEqual("bad", self.index.art_status(game["id"]))
+        self.assertEqual([], [p for p in (self.env.data / "art").rglob("*") if p.is_file() and p.parent.name == "snes"])
+
+    def test_only_https_to_the_one_host_and_an_unreachable_host_is_silent(self):
+        for url in ("http://thumbnails.libretro.com/x.png", "https://example.invalid/x.png", "https://thumbnails.libretro.com.evil.invalid/x.png", "file:///etc/passwd"):
+            self.assertIsNone(xa.art_get(url, 10), url)
+        self.touch(self.games / "snes" / "Chrono Trigger (USA).sfc")
+        xa.set_art(self.env, True)
+        game = self.library()["Chrono Trigger"]
+        host = FakeHost({})
+        f = self.fetcher(host)
+        self.assertIsNone(f.fetch(game))
+        self.assertEqual(1, len(host.urls), "one failed listing, then no guessing")
+        self.assertIsNone(self.index.art_status(game["id"]), "an unreachable host is not a remembered miss")
+
+    def test_requests_are_spaced_out(self):
+        self.touch(self.games / "snes" / "Chrono Trigger (USA).sfc")
+        xa.set_art(self.env, True)
+        slept = []
+        f = xa.ArtFetcher(self.env, self.index, get=FakeHost({(_SNES, "Named_Boxarts"): ["Chrono Trigger (USA)"]}), sleep=slept.append, clock=lambda: 0.0)
+        f.fetch(self.library()["Chrono Trigger"])
+        self.assertEqual([xa.ART_INTERVAL], slept)
+        self.assertIn("XivArcade", xa.ART_AGENT)
+
+
 class Hygiene(unittest.TestCase):
-    def test_the_tool_names_no_download_source(self):
+    def test_the_tool_contacts_exactly_two_hosts(self):
+        text = _PATH.read_text()
+        self.assertNotIn("http://" + "thumbnails", text)
+        hosts = set(re.findall(r"https?://([A-Za-z0-9.\-]+)", text)) | set(re.findall(r'"([a-z0-9\-]+(?:\.[a-z0-9\-]+)+\.(?:com|org|net|io|info|to|cc|me))"', text))
+        self.assertEqual({"127.0.0.1", "thumbnails.libretro.com"}, hosts, "Syncthing on localhost and the thumbnail host, nothing else")
+
+    def test_nothing_in_the_tool_can_fetch_a_game_or_a_bios(self):
         text = _PATH.read_text().lower()
-        for word in ("http://", "https://"):
-            for hit in [line for line in text.splitlines() if word in line]:
-                self.assertIn("127.0.0.1", hit, "the only URL the tool may hold is Syncthing on localhost")
+        for word in ("myrient", "archive.org", "vimm", "emuparadise", "romsfun", "cdromance", "coolrom", "edgeemu", "redump.org", "no-intro.org", "magnet:", ".torrent"):
+            self.assertNotIn(word, text)
+        # exactly two places open a connection: Syncthing's local API and art_get (one host, pictures only)
+        calls = [line.strip() for line in _PATH.read_text().splitlines() if "urlopen(" in line or "opener.open(" in line]
+        self.assertEqual(2, len(calls), calls)
+        self.assertEqual(1, sum("ART_AGENT" in c for c in calls))
+        self.assertEqual({".png", ".jpg", None}, {xa.image_kind(b) for b in (_png(), b"\x7fELF", b"\xff\xd8\xff\xdb\x00\x02\xff\xc0\x00\x0b\x08\x00\x10\x00\x10\x03\x01\xff\xd9")})
 
 
 if __name__ == "__main__":

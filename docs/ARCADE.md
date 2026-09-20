@@ -12,7 +12,7 @@ working in the game, with a real emulator, or syncing between two real machines.
 
 XivArcade never downloads, links to or helps find ROMs, disc images or BIOS files. It only reads
 folders you point it at. Use your own dumps of games you own. The same goes for artwork: a picture is
-shown only when the file is already on your disk; nothing is scraped. PlayStation and PlayStation 2
+shown only when the file is already on your disk, unless you turn on [cover art fetching](#fetching-cover-art-opt-in), which is off by default and is for artwork only. PlayStation and PlayStation 2
 cores want a BIOS dumped from your own console; XivArcade will not look for one.
 
 ## What you type
@@ -25,6 +25,7 @@ cores want a BIOS dumped from your own console; XivArcade will not look for one.
 | `/arcade list` | Prints the library by console. |
 | `/arcade sync` | Forces a save sync and prints its status. |
 | `/arcade setup` | The first-run checklist, in the window and in chat. |
+| `/arcade art [on\|off\|refresh]` | Opt-in cover art for games in your library; off by default. See [Fetching cover art](#fetching-cover-art-opt-in). |
 | `/arcade rescan` | Looks at the folders again (the window does this by itself while open). |
 | `/arcade launchbox <folder>` | Reads a LaunchBox folder where it lives. |
 | `/arcade import-saves <folder>` | Copies saves from another RetroArch install. Never over a newer save. |
@@ -62,8 +63,8 @@ become the real thing when a matching file of yours, and your picture of its box
 
 ### Covers
 
-Artwork is strictly bring-your-own. XivArcade never downloads, scrapes or links to artwork; a picture
-is shown only when the file is already on your disk. The first of these that exists wins:
+Artwork is bring-your-own unless you turn fetching on (below); out of the box nothing is contacted and a
+picture is shown only when the file is already on your disk. The first of these that exists wins:
 
 1. `cover.png` / `cover.jpg` beside a game that has a folder to itself
    (`~/Games/Arcade/psx/Vagrant Story/cover.png`). In a folder of many games a `cover` file belongs to
@@ -73,7 +74,8 @@ is shown only when the file is already on your disk. The first of these that exi
    `~/Games/Arcade/snes/covers/Final Fantasy VI.png`.
 4. Your LaunchBox `Images/<Platform>/Box - Front` folder (then Reconstructed, Fanart, 3D, Clear Logo and
    the screenshot folders), by LaunchBox id, title or file name, `-01` suffixes included.
-5. Otherwise a **drawn cover**: the console's colour down the spine, the title set as large as fits,
+5. A cover fetched earlier, if you turned [fetching](#fetching-cover-art-opt-in) on.
+6. Otherwise a **drawn cover**: the console's colour down the spine, the title set as large as fits,
    the year and the console's mark, in that console's box shape. No image file is involved.
 
 Press F5 after adding or replacing a picture. Pictures keep their own proportions and drawn covers keep
@@ -82,6 +84,44 @@ Advance boxes, tall PlayStation 2 and PSP cases); nothing is stretched. Pictures
 background, kept as thumbnails (384 px on the long side, the 256 most recently seen) and released when
 the plugin unloads, so a large library costs neither frames nor memory. Hovering a drawn cover says
 exactly where that game's picture would go.
+
+### Fetching cover art (opt-in)
+
+**Off by default.** Press *Fetch cover art for my games* in the window, or type `/arcade art on`
+(`/arcade art off` stops it, `/arcade art refresh` asks again for games that had no match, `/arcade art`
+says where things stand). On the host it is `xiv-arcade art [on|off|refresh]`.
+
+- **What is contacted:** one host, `thumbnails.libretro.com`, over HTTPS only. It is RetroArch's own public
+  thumbnail set (libretro-thumbnails), the same pictures RetroArch downloads for a playlist. A redirect
+  anywhere else is refused.
+- **What is sent:** the console's name and the game's name, inside the address of the picture
+  (`/Sony - PlayStation/Named_Boxarts/Final Fantasy VII (USA) (Disc 1).png`), and a User-Agent that names
+  XivArcade. No file, hash, path, account or identifier. The console's list of names is downloaded once
+  (and kept for a month) so that matching happens on your machine: your file name first, then the cleaned
+  title, then the usual regions, then a near-identical title; betas, demos and samples lose.
+- **Only your library:** a lookup happens only for a game file that is in your library and has no picture
+  of yours. The Final Fantasy shelf's placeholders are never looked up, and the set is never mirrored.
+- **Manners and safety:** one request a second, a 15 second timeout, 4 MB per picture, and a response is
+  kept only if its bytes really are a PNG or JPEG of a sane size; anything else is dropped and the drawn
+  cover stays. Every answer, found or not, is remembered in the library database, so nothing is asked
+  twice. Failures are silent.
+- **Where it goes:** `$XDG_DATA_HOME/xiv-arcade/art/<console>/` (default `~/.local/share/xiv-arcade/art`).
+  Your own pictures always win over these. Turning fetching off stops all contact; covers already on
+  disk stay in use until you delete that folder. The window scales them to thumbnails when it loads them
+  (the helper is standard-library Python and does not re-encode images).
+- **Whose pictures:** box art belongs to its owners. It is fetched only to be shown in your own library,
+  and XivArcade ships and redistributes none of it.
+- The fetching is done by the helper on your Linux host, outside the game; the plugin never opens a
+  connection and only reads the progress the helper writes to `state.json`, so covers appear on the wall
+  as they arrive.
+
+This is for artwork only. Games, disc images and BIOS files are never fetched, linked to or located.
+
+**Not done (TODO): asking a local model.** When no name matches, XivArcade could ask your own local
+model through Almanac (`Almanac.Ask`) for the game's canonical No-Intro name and accept the answer only
+if it is a real entry in the console's list. The matching runs in the host helper and Almanac's IPC
+lives inside the game, so this needs a request/response bridge between the two; it was left out rather
+than half-built. XivMcp is not, and will not be, a dependency.
 
 ### Folders and consoles
 

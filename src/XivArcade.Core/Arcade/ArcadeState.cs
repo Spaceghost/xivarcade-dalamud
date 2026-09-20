@@ -52,6 +52,16 @@ public sealed record ArcadeBiosFile(string Name, string What, long Size, string 
 public sealed record ArcadeBios(string Dir, bool Required, bool Ok, bool Hle, string Summary, IReadOnlyList<ArcadeBiosFile> Files);
 
 /// <summary>
+/// Opt-in cover art. Off until the player turns it on; when on, the helper asks one host (RetroArch's public
+/// thumbnail set) for pictures of games that are already in the library, sending the console's and the game's
+/// name and nothing else. The plugin itself never opens a connection: it only reads this.
+/// </summary>
+public sealed record ArcadeArt(bool Enabled, bool Running, string Host, string Notice, string Folder, int Fetched, int Without, int Waiting)
+{
+    public static readonly ArcadeArt Off = new(false, false, "", "", "", 0, 0, 0);
+}
+
+/// <summary>
 /// What tools/xiv-arcade wrote to state.json: the first-run checks, the save sync verdict, the shelf, and the
 /// library. The plugin only ever reads this; every decision about games and saves is the helper's.
 /// </summary>
@@ -89,6 +99,8 @@ public sealed record ArcadeState
     public IReadOnlyList<ArcadeCheck> Checks { get; init; } = [];
 
     public ArcadeSync Sync { get; init; } = ArcadeSync.Unknown;
+
+    public ArcadeArt Art { get; init; } = ArcadeArt.Off;
 
     public IReadOnlyList<ArcadeShelfEntry> Shelf { get; init; } = [];
 
@@ -153,6 +165,10 @@ public sealed record ArcadeState
                 LaunchBoxFound = lb.ValueKind == JsonValueKind.Object ? Strings(lb, "found") : [],
                 Checks = checks,
                 Sync = sync,
+                Art = r.TryGetProperty("art", out var art) && art.ValueKind == JsonValueKind.Object
+                    ? new ArcadeArt(Bool(art, "enabled"), Bool(art, "running"), Str(art, "host"), Str(art, "notice"), Str(art, "folder"),
+                        (int)(Num(art, "fetched") ?? 0), (int)(Num(art, "without") ?? 0), (int)(Num(art, "waiting") ?? 0))
+                    : ArcadeArt.Off,
                 Shelf = List(r, "shelf", e => new ArcadeShelfEntry(Str(e, "key"), Str(e, "title"), (int)(Num(e, "year") ?? 0), Str(e, "platforms"), Strings(e, "games"))),
                 Games = List(r, "games", g => new ArcadeGame(Str(g, "id"), Str(g, "title"), (int?)Num(g, "year"), Str(g, "system"), Str(g, "path"),
                     (int)(Num(g, "discs") ?? 0), Strings(g, "ff"), NullStr(g, "boxart"), Num(g, "last_played"), Bool(g, "ready"))),
@@ -204,8 +220,13 @@ public static class ArcadeText
 {
     public const string Legal = "XivArcade never downloads, links to or helps find ROMs, disc images or BIOS files. It only reads folders you point it at. Use your own dumps of games you own.";
 
+    /// <summary>Shown wherever cover art can be turned on, before anything is contacted.</summary>
+    public const string ArtNotice = "Off by default. When on, the helper on your Linux host asks thumbnails.libretro.com (RetroArch's own public thumbnail set) over HTTPS "
+        + "for covers of the games that are already in your library. Only the console's name and the game's name are sent: no files, no hashes, no paths. "
+        + "Artwork belongs to its owners and is fetched only to be shown in your own library. Your own pictures always win, and games, disc images and BIOS files are never fetched.";
+
     public const string Help = "/arcade opens the library; /arcade <name> plays the closest match; /arcade last resumes; /arcade list; /arcade sync; /arcade setup; "
-        + "/arcade rescan; /arcade launchbox <folder>; /arcade import-saves <folder>; /arcade launch --dry-run <name or file>; "
+        + "/arcade rescan; /arcade art [on|off|refresh]; /arcade launchbox <folder>; /arcade import-saves <folder>; /arcade launch --dry-run <name or file>; "
         + "/arcade pad [on|off|auto] (the gamepad belongs to the arcade game while you play; hold Start+Select or press Esc to take it back); "
         + "/arcade emulator [console|game choice]; /arcade bios; /arcade paths; /arcade games-folder <dir>; /arcade saves-folder <dir>.";
 }
