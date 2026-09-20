@@ -11,6 +11,10 @@
       "items": [
         {
           "status": "beta",
+          "text": "The Arcade window is now a box-art wall instead of text tiles: your own covers in a grid, Final Fantasy first and then a shelf per console, the selected cover growing a little with a gold glow while the rest dim, and a details strip with the title, console, year, discs, last played, save-sync state and a Play button. Arrows or the D-pad move, Enter or confirm plays, typing filters the covers, Tab changes shelf. A game with no picture gets a drawn cover in its console's box shape (spine in the console's colour, fitted title, year, system mark), and the 26 Final Fantasy titles use those, dimmed, until your file and your picture appear. Artwork stays bring-your-own and nothing is downloaded: drop `cover.png` beside a game in its own folder, or `<console>/covers/<game name>.png`, or use your LaunchBox image folders. Pictures load in the background as thumbnails and are released on unload. Host tests cover the layout, the picture cache, title fitting and the lookup order; none of it has been seen in game yet."
+        },
+        {
+          "status": "beta",
           "text": "Gamepad: while an arcade game's panel has the focus, FFXIV no longer also reacts to the controller. A banner shows for as long as the gamepad belongs to the arcade game. Hold Start+Select for a second, press Esc or type `/arcade pad off` to take it back; it also lets go by itself in combat, cutscenes, zone changes, at logout, when the game closes or its panel loses focus, and when the plugin unloads. If the game-side hook cannot be installed, FFXIV is left untouched and the first-run list says so. It only withholds your own input; it never sends any."
         },
         {

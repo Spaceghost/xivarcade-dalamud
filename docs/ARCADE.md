@@ -35,7 +35,9 @@ cores want a BIOS dumped from your own console; XivArcade will not look for one.
 | `/arcade paths` · `games-folder <dir>` · `saves-folder <dir>` | The folders in use; your own games folder; your own synced saves folder (existing saves are not moved). |
 
 If XivDesktop is installed, its launcher palette (Super+D) finds your games by name, with an `Arcade` badge.
-In the window: type to search, arrows move, Enter plays, F5 rescans, F6 syncs saves, Esc closes.
+In the window: type to search (the covers filter as you type), arrows or the D-pad move through the
+covers, Enter or the confirm button plays, Tab (Shift+Tab, or L1/R1) changes shelf, F5 rescans, F6 syncs
+saves, Esc closes. A click selects a cover; a second click plays it.
 
 ## First run: three steps
 
@@ -52,8 +54,34 @@ green by themselves:
 3. **Drop your own game files in.** Copy them into the console folders. They appear in the window
    without a restart.
 
-Below the steps is the Final Fantasy shelf: titles, consoles and years as plain text. An entry
-lights up when a matching file of yours appears. Anything else lands under "Everything else", by console.
+Below the steps is the cover wall: the Final Fantasy shelf first, then one shelf per console. The
+selected cover grows a little and glows gold while the others dim; the strip underneath shows its title,
+console, year, discs, when you last played it, the state of save sync, and the Play button. The 26
+Final Fantasy titles are there from the start as dimmed drawn covers ("not in your library yet") and
+become the real thing when a matching file of yours, and your picture of its box, appear.
+
+### Covers
+
+Artwork is strictly bring-your-own. XivArcade never downloads, scrapes or links to artwork; a picture
+is shown only when the file is already on your disk. The first of these that exists wins:
+
+1. `cover.png` / `cover.jpg` beside a game that has a folder to itself
+   (`~/Games/Arcade/psx/Vagrant Story/cover.png`). In a folder of many games a `cover` file belongs to
+   none of them and is ignored.
+2. A picture with the game's name beside the game (`Final Fantasy VI.png`).
+3. `covers/<game name>.png` (or `.jpg`; `boxart/` works too) beside the game or in the console folder:
+   `~/Games/Arcade/snes/covers/Final Fantasy VI.png`.
+4. Your LaunchBox `Images/<Platform>/Box - Front` folder (then Reconstructed, Fanart, 3D, Clear Logo and
+   the screenshot folders), by LaunchBox id, title or file name, `-01` suffixes included.
+5. Otherwise a **drawn cover**: the console's colour down the spine, the title set as large as fits,
+   the year and the console's mark, in that console's box shape. No image file is involved.
+
+Press F5 after adding or replacing a picture. Pictures keep their own proportions and drawn covers keep
+their console's (wide Super NES and Nintendo 64 boxes, square PlayStation jewel cases and Game Boy
+Advance boxes, tall PlayStation 2 and PSP cases); nothing is stretched. Pictures are read in the
+background, kept as thumbnails (384 px on the long side, the 256 most recently seen) and released when
+the plugin unloads, so a large library costs neither frames nor memory. Hovering a drawn cover says
+exactly where that game's picture would go.
 
 ### Folders and consoles
 
@@ -77,7 +105,7 @@ Multi-disc games named `Game (Disc 1).chd`, `Game (Disc 2).chd` become one entry
 (`.m3u`) is written to `~/.config/xiv-arcade/playlists/`, never into your games folder. Your own `.m3u`
 is used as it is. On the Super NES, "Final Fantasy II" and "III" light up IV and VI.
 
-Artwork is optional: an image with the game's name (`.png`, `.jpg`) beside it or in a `boxart/` folder.
+Artwork is optional and always your own file: see [Covers](#covers).
 
 ## Coming from LaunchBox
 
@@ -326,11 +354,14 @@ things differed and are fixed: 1.30 accepts `--addresses` on `devices add` but l
 `dynamic`, so the address is also set with `devices ID addresses 0 set`; and the device ID is
 `syncthing device-id` on 2.x but `syncthing --device-id` on 1.x, so both are tried.
 
-**Not verified:** anything in the game (the window, the panel, focus, the gamepad hook and its banner),
+**Not verified:** anything in the game (the window and its cover wall, picture loading through Dalamud, the drawn covers, the animation, D-pad input in the window, the panel, focus, the gamepad hook and its banner),
 any real emulator or core (RetroArch, PCSX2, DuckStation), the Wine `start /unix` fallback, the derived
 Wine root on a real prefix, and sync between two real machines. **RetroArch honouring `--appendconfig`
 inside Flatpak was not checked**: the build container has no Flatpak, and nothing was installed
 system-wide to get one. What changed instead is that the launch no longer depends on a one-time
 `flatpak override`: every run passes `--filesystem=` for the appended config, the saves and the game's
 folder. No game was launched: no test ROM was used, so launching is covered
+**Not verified:** anything in the game (the window and its cover wall, picture loading through Dalamud, the drawn covers, the animation, D-pad input, the panel, focus, the controller), any real
+emulator or core, the Wine `start /unix` fallback, RetroArch honouring the appended config inside Flatpak, the `syncthing cli` commands,
+and sync between two real machines. No game was launched: no test ROM was used, so launching is covered
 by command construction and `--dry-run` only.

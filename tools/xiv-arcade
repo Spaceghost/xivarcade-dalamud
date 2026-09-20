@@ -974,7 +974,7 @@ class Index:
 LB_IMAGE_FOLDERS = ("Box - Front", "Box - Front - Reconstructed", "Fanart - Box - Front", "Box - 3D", "Clear Logo",
                     "Screenshot - Game Title", "Screenshot - Gameplay")
 _LB_SKIP = {"images", "data", "metadata", "core", "thirdparty", "emulators", "manuals", "music", "videos", "themes",
-            "plugins", "backups", "updates", "logs", "boxart"}
+            "plugins", "backups", "updates", "logs", "boxart", "covers"}
 
 
 def platform_system(name: str) -> System | None:
@@ -1114,10 +1114,30 @@ class LbImages:
 # Scanning
 # --------------------------------------------------------------------------------------------
 
-def find_boxart(content: Path, title: str) -> str | None:
-    """Artwork only from files the player put there: next to the game, or in a boxart/ folder beside it."""
-    for d in (content.parent, content.parent / "boxart"):
-        for stem in (content.stem, strip_disc(content.stem), title):
+COVER_DIRS = ("covers", "boxart")
+
+
+def find_boxart(content: Path, title: str, system_dir: Path | None = None) -> str | None:
+    """Artwork only from files the player put there, nearest first: cover.png/jpg beside a game that has its
+    own folder, an image with the game's name beside it, then covers/ (or boxart/) beside it or in the
+    console folder. LaunchBox image folders come after this, and a generated cover after that."""
+    here = content.parent
+    stems = (content.stem, strip_disc(content.stem), title)
+    try:
+        own = {strip_disc(f.stem).lower() for f in here.iterdir()
+               if f.suffix.lower() == content.suffix.lower() and f.is_file()}
+    except OSError:
+        own = set()
+    if len(own) <= 1 and here != system_dir:    # "cover" in a folder of many games would belong to none of them
+        for ext in IMAGE_EXTS:
+            p = here / ("cover" + ext)
+            if p.is_file():
+                return str(p)
+    dirs = [here, *(here / d for d in COVER_DIRS)]
+    if system_dir is not None and system_dir != here:
+        dirs.extend(system_dir / d for d in COVER_DIRS)
+    for d in dirs:
+        for stem in stems:
             for ext in IMAGE_EXTS:
                 p = d / (stem + ext)
                 if p.is_file():
@@ -1203,7 +1223,7 @@ def _add(env: Env, found: dict, sid: str, title: str, files: list[str], rec: dic
             atomic_write(playlist, text)
         path, discs = str(playlist), files
     first = Path(files[0])
-    art = find_boxart(first, title)
+    art = find_boxart(first, title, env.games_root() / SYSTEM_BY_ID[sid].folder)
     if art is None:
         for lbroot, images in lb_images.items():
             if files[0].startswith(lbroot + os.sep):
@@ -1609,8 +1629,9 @@ def setup(env: Env, games: str | None = None, launchbox: str | None = None, save
     root.mkdir(parents=True, exist_ok=True)
     _readme(root / "README.txt",
             "Arcade games folder\n===================\n\nDrop your own game files into the folder for their console. "
-            "They show up in /arcade by themselves.\nOptional artwork: an image with the same name as the game "
-            "(.png or .jpg), beside it or in a boxart/ folder.\n\n" + LEGAL + "\n")
+            "They show up in /arcade by themselves.\nOptional artwork, your own files only: <console>/covers/<game name>.png "
+            "(or .jpg), an image with the game's name beside it, or cover.png beside a game that has its own folder. "
+            "Games without a picture get a drawn cover.\n\n" + LEGAL + "\n")
     for s in SYSTEMS:
         d = root / s.folder
         d.mkdir(exist_ok=True)

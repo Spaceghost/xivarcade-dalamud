@@ -32,9 +32,14 @@ that Syncthing copies between your machines.
 
 ## What you get
 
-- A library window in the launcher's dark-glass style: search, arrows, Enter to play.
+- A box-art wall in the shared dark-ink, gold and glass style: your own covers in a grid by shelf, the
+  selected one glowing, a details strip with Play. Type to search, arrows or D-pad, Enter to play, Tab
+  changes shelf.
+- Covers are your own files (`<console>/covers/<game name>.png`, `cover.png` in a game's folder, or
+  LaunchBox `Images/`); a game without one gets a drawn cover in its console's box shape. Nothing is
+  downloaded. See [docs/ARCADE.md](docs/ARCADE.md#covers).
 - A three-step first run whose checks turn green by themselves, each with one command to copy.
-- A text-only Final Fantasy shelf (titles, consoles, years) that lights up as your files appear.
+- A 26-title Final Fantasy shelf of drawn covers that light up as your files appear.
 - LaunchBox libraries copied in as they are: platform folders, `Data/Platforms/*.xml`, `Images/`.
 - Multi-disc games as one entry (`.m3u` written outside your games folder).
 - One synced save tree, file versioning on; a game never starts while its saves are still arriving, a
@@ -108,7 +113,7 @@ LaunchBox: copy the folder in, or `/arcade launchbox /path/to/LaunchBox`.
 | `/arcade import-saves <folder>` | Copy saves from another RetroArch install, never over a newer save. |
 | `/arcade launch --dry-run <name or file>` | Print the exact emulator command and start nothing. |
 
-In the window: type to search, arrows move, Enter plays, F5 rescans, F6 syncs, Esc closes.
+In the window: type to search, arrows or D-pad move, Enter plays, Tab changes shelf, F5 rescans, F6 syncs, Esc closes.
 
 ## Save sync
 

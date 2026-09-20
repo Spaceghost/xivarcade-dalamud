@@ -104,6 +104,23 @@ class TitlesAndDiscs(Tree):
         self.touch(d / "Final Fantasy IX.bin")
         self.assertEqual(["Final Fantasy IX"], [g["title"] for g in xa.scan(self.env)])
 
+    def test_artwork_precedence_is_game_side_then_covers_folder_then_nothing(self):
+        game = self.touch(self.games / "psx" / "Vagrant Story" / "Vagrant Story.chd")
+        art = lambda: xa.scan(self.env)[0]["boxart"]
+        self.assertIsNone(art())
+        console = self.touch(self.games / "psx" / "covers" / "Vagrant Story.jpg")
+        self.assertEqual(str(console), art())
+        named = self.touch(game.parent / "Vagrant Story.png")
+        self.assertEqual(str(named), art())
+        cover = self.touch(game.parent / "cover.png")
+        self.assertEqual(str(cover), art())
+
+    def test_a_cover_file_in_a_folder_of_many_games_belongs_to_none_of_them(self):
+        self.touch(self.games / "snes" / "Chrono Trigger.sfc")
+        self.touch(self.games / "snes" / "Secret of Mana.sfc")
+        self.touch(self.games / "snes" / "cover.png")
+        self.assertEqual([None, None], [g["boxart"] for g in xa.scan(self.env)])
+
     def test_boxart_only_from_the_players_files(self):
         self.touch(self.games / "snes" / "Final Fantasy VI.sfc")
         self.assertIsNone(xa.scan(self.env)[0]["boxart"])

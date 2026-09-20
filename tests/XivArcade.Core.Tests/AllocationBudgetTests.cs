@@ -25,4 +25,18 @@ public sealed class AllocationBudgetTests
         var bytes = PerOperation(() => ArcadeCommands.Score("Final Fantasy Tactics Advance", "ff tactics"));
         Assert.True(bytes < 4096, $"{bytes} bytes allocated per score, budget 4096");
     }
+
+    [Fact]
+    public void LayingOutTheCoverWallEveryFrameAllocatesNothing()
+    {
+        var grid = new CoverGrid();
+        List<int> counts = [26, 120, 40, 300];
+        var bytes = PerOperation(() =>
+        {
+            grid.Build(counts, 1180, 148, 190, 16, 34);
+            var focused = CoverLayout.Focus(CoverLayout.AspectFit(1.4f, grid.Cells[7]), 0.6f);
+            _ = CoverLayout.Brightness(0.6f) + focused.W + grid.Move(7, 0, 1) + CoverGrid.ScrollTo(grid.Cells[400], 0, 600, grid.Height);
+        }, 2000);
+        Assert.True(bytes < 64, $"{bytes} bytes allocated per frame of layout, budget 64");
+    }
 }

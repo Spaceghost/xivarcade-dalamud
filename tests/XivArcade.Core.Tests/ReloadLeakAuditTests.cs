@@ -21,6 +21,9 @@ public sealed partial class ReloadLeakAuditTests
         ("HookFromSignature", ".Dispose()"),
         ("DtrBar.Get(", ".Remove()"),
         ("NewFontHandle(", ".Dispose()"),
+        ("NewDelegateFontHandle(", "coverFont?.Dispose()"),
+        ("new CoverCache<", "covers.Dispose()"),   // every cover texture the provider handed out
+        ("new ArcadeWindow(", "window?.Dispose()"), // and the window that owns that cache
     ];
 
     [GeneratedRegex(@"^\s*(?<event>[A-Za-z_][\w.]*)\s*\+=\s*(?<handler>(?:this\.)?[A-Z]\w*)\s*;", RegexOptions.Multiline)]

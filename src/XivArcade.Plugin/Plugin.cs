@@ -1,4 +1,5 @@
 using Dalamud.Game.Command;
+using Dalamud.Interface.ManagedFontAtlas;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
@@ -29,12 +30,13 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ArcadeWindow window = null!;
     private readonly PadCaptureService pad = null!;
     private (string Root, bool Derived)? wineRoot;
+    private readonly IFontHandle? coverFont;
     private readonly ICallGateProvider<string, string>? search;
     private readonly ICallGateProvider<string, string>? launch;
     private bool commandRegistered;
 
     public Plugin(IDalamudPluginInterface pluginInterface, IPluginLog log, IFramework framework, ICommandManager commands, IChatGui chat, ITextureProvider textures,
-        IGameInteropProvider interop, ICondition condition, IClientState clientState, IKeyState keys)
+        IGameInteropProvider interop, ICondition condition, IClientState clientState, IKeyState keys, IGamepadState gamepad)
     {
         this.pluginInterface = pluginInterface;
         this.log = log;
@@ -51,7 +53,17 @@ public sealed class Plugin : IDalamudPlugin
             pad = new PadCaptureService(framework, interop, condition, clientState, keys, log, arcade, host, config);
             pad.Changed += OnArcadeMessage;
             arcade.PluginCheck = () => pad.Check;
-            window = new ArcadeWindow(arcade, textures, Paths, config, () => pluginInterface.SavePluginConfig(config));
+            try
+            {
+                // the drawn covers set their titles large; without this font they fall back to the game's UI font
+                coverFont = pluginInterface.UiBuilder.FontAtlas.NewDelegateFontHandle(e => e.OnPreBuild(tk => tk.AddDalamudDefaultFont(40f)));
+            }
+            catch (Exception ex)
+            {
+                log.Warning(ex, "XivArcade: the cover title font is unavailable; using the default font");
+            }
+
+            window = new ArcadeWindow(arcade, textures, gamepad, coverFont, Paths, config, () => pluginInterface.SavePluginConfig(config));
             windowSystem.AddWindow(window);
             pluginInterface.UiBuilder.Draw += DrawUi;
             pluginInterface.UiBuilder.OpenMainUi += OpenMainUi;
@@ -244,6 +256,8 @@ public sealed class Plugin : IDalamudPlugin
         pluginInterface.UiBuilder.OpenMainUi -= OpenMainUi;
         pluginInterface.UiBuilder.OpenConfigUi -= OpenConfigUi;
         windowSystem.RemoveAllWindows();
+        window?.Dispose(); // every cover texture
+        coverFont?.Dispose();
         GameCursor.Release();
         if (pad != null)
         {
