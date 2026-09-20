@@ -4,10 +4,10 @@
   "intro": "Every change to XivArcade a player can see, newest first.\n\nXivArcade has not yet been observed running in the game: host tests cover the library, LaunchBox import, the emulator command, name matching, the save-sync rules and the IPC payloads, and nothing below about in-game behaviour has been seen working. Treat it as the design, not as a result — the README says the same thing.",
   "releases": [
     {
-      "version": "next",
-      "title": "In the workshop",
-      "date": "",
-      "blurb": "Merged, not in a release yet.",
+      "version": "0.2.0",
+      "title": "Released 2026-09-20",
+      "date": "2026-09-20",
+      "blurb": "BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.",
       "items": [
         {
           "status": "beta",
