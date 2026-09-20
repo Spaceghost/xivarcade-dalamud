@@ -166,7 +166,12 @@ class LaunchCommand(Tree):
         for sid, core in cores.items():
             system = xa.SYSTEM_BY_ID[sid]
             argv, found = xa.plan_launch(self.env, {"system": sid, "path": f"/g/{sid}/Game{system.exts[0]}"})
-            self.assertEqual(["flatpak", "run", "org.libretro.RetroArch", "-L"], argv[:4])
+            self.assertEqual(["flatpak", "run"], argv[:2])
+            at = argv.index("org.libretro.RetroArch")
+            self.assertEqual({f"--filesystem={self.env.games_root()}", f"--filesystem=/g/{sid}", f"--filesystem={self.env.data}",
+                              f"--filesystem={self.env.sync_root}", f"--filesystem={self.env.config}:ro"}, set(argv[2:at]))
+            argv = argv[at - 2:]
+            self.assertEqual("-L", argv[3])
             self.assertTrue(argv[4].endswith(f"/cores/{core}_libretro.so"), argv)
             self.assertEqual(["--appendconfig", str(self.env.config / "cfg" / f"{sid}.cfg")], argv[5:7])
             self.assertEqual(f"/g/{sid}/Game{system.exts[0]}", argv[7])
@@ -413,7 +418,7 @@ class FirstRun(Tree):
         index = xa.Index(self.env.db_path)
         index.replace_library(xa.scan(self.env))
         state = xa.build_state(self.env, index, FakeSync())
-        self.assertEqual([True, True, True], [c["ok"] for c in state["checks"]])
+        self.assertEqual([True, True, True], [c["ok"] for c in state["checks"][:3]])  # then the BIOS step: test_limits.py
         ff8 = next(e for e in state["shelf"] if e["key"] == "ff8")
         self.assertEqual([state["games"][0]["id"]], ff8["games"])
         self.assertTrue(state["games"][0]["ready"])

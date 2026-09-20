@@ -13,6 +13,16 @@ Statuses mean the same thing in every one of these mods:
 * **BETA** — merged, but not yet verified in game.
 * **SOON** — still being built.
 
+## [Unreleased] — In the workshop
+
+Merged, not in a release yet.
+
+* Gamepad: while an arcade game's panel has the focus, FFXIV no longer also reacts to the controller. A banner shows for as long as the gamepad belongs to the arcade game. Hold Start+Select for a second, press Esc or type `/arcade pad off` to take it back; it also lets go by itself in combat, cutscenes, zone changes, at logout, when the game closes or its panel loses focus, and when the plugin unloads. If the game-side hook cannot be installed, FFXIV is left untouched and the first-run list says so. It only withholds your own input; it never sends any.
+* PlayStation 2 can run in standalone PCSX2 (Flatpak or native) as well as the LRPS2 core, and PlayStation in DuckStation; `/arcade emulator` shows the choices and sets a preferred emulator per console or per game. Their memory cards and save states go into the synced saves folder through a generated profile; your own emulator settings are never edited.
+* BIOS: `/arcade bios` and a first-run step name the exact file your emulator reads, its size and MD5, and the folder for your own dump; the step turns green when a correct file appears and says what is wrong with one that is not (wrong size, another region under this name, a different revision). With no PlayStation BIOS, PCSX ReARMed is chosen and labelled "no BIOS needed, lower compatibility". PlayStation 2 always needs one. XivArcade still never downloads, links to or helps find a BIOS.
+* Folders: `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME`, Flatpak and native RetroArch locations, a custom games folder (`/arcade games-folder`) and a custom saves folder (`/arcade saves-folder`, `xiv-arcade setup --saves DIR`) are honoured, and the plugin finds what Wine calls the Linux root instead of assuming `Z:`. An existing setup is used where it is; saves are copied only with `--copy-saves`.
+* Save-sync setup: the `syncthing cli` commands were run against real Syncthing 1.30 and 2.0. A peer's address now sticks on 1.x, and `xiv-arcade pair` prints the device ID on both. RetroArch under Flatpak is given access to the saves, the game and the appended config on every launch, so a forgotten `flatpak override` no longer matters.
+
 ## [0.1.1] — Released 2026-09-20
 
 BETA entries are in this release but have not been verified in game yet; they become NEW or FIX once they have been seen working.

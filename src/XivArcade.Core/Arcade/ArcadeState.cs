@@ -28,7 +28,28 @@ public sealed record ArcadeShelfEntry(string Key, string Title, int Year, string
 
 public sealed record ArcadeGame(string Id, string Title, int? Year, string System, string Path, int Discs, IReadOnlyList<string> Ff, string? Boxart, double? LastPlayed, bool Ready);
 
-public sealed record ArcadeSystem(string Id, string Name, string Folder, IReadOnlyList<string> Extensions, string? Core, string Hint, string Note);
+public sealed record ArcadeSystem(string Id, string Name, string Folder, IReadOnlyList<string> Extensions, string? Core, string Hint, string Note)
+{
+    /// <summary>The emulator that will run this console ("RetroArch · swanstation", "PCSX2 (standalone)"); empty when none is installed.</summary>
+    public string Emulator { get; init; } = "";
+
+    /// <summary>The player's choice: "auto", "retroarch", "retroarch:core" or a standalone emulator's id.</summary>
+    public string Preferred { get; init; } = "auto";
+
+    /// <summary>Every emulator the helper can start for this console, installed or not.</summary>
+    public IReadOnlyList<ArcadeEmulator> Emulators { get; init; } = [];
+
+    /// <summary>What the chosen emulator wants as a BIOS and what is there; null when this console needs none.</summary>
+    public ArcadeBios? Bios { get; init; }
+}
+
+public sealed record ArcadeEmulator(string Id, string Label, bool Installed, bool BiosFree);
+
+/// <summary>One BIOS file the emulator reads: its exact name, size and MD5, and whether the player's file is that dump.</summary>
+public sealed record ArcadeBiosFile(string Name, string What, long Size, string Md5, string State, string Detail);
+
+/// <summary>The BIOS situation of one console. XivArcade names the file and the folder; it never fetches or locates one.</summary>
+public sealed record ArcadeBios(string Dir, bool Required, bool Ok, bool Hle, string Summary, IReadOnlyList<ArcadeBiosFile> Files);
 
 /// <summary>
 /// What tools/xiv-arcade wrote to state.json: the first-run checks, the save sync verdict, the shelf, and the
@@ -45,6 +66,15 @@ public sealed record ArcadeState
     public string Message { get; init; } = "";
 
     public string? PlayingTitle { get; init; }
+
+    /// <summary>The helper process that is waiting on the emulator; 0 when unknown. /proc/PID gone means the game ended.</summary>
+    public int PlayingPid { get; init; }
+
+    /// <summary>Folders whose changes should trigger a rescan besides the games folder (the BIOS folders).</summary>
+    public IReadOnlyList<string> Watch { get; init; } = [];
+
+    /// <summary>Things the helper wants the player to know about its directories (a setup kept where it was).</summary>
+    public IReadOnlyList<string> Notes { get; init; } = [];
 
     public string GamesRoot { get; init; } = "";
 
@@ -113,6 +143,9 @@ public sealed record ArcadeState
                 Legal = Str(r, "legal") is { Length: > 0 } legal ? legal : ArcadeText.Legal,
                 Message = Str(r, "message"),
                 PlayingTitle = r.TryGetProperty("playing", out var p) && p.ValueKind == JsonValueKind.Object ? Str(p, "title") : null,
+                PlayingPid = p.ValueKind == JsonValueKind.Object && Num(p, "pid") is > 0 and < int.MaxValue and var pid ? (int)pid : 0,
+                Watch = Strings(r, "watch"),
+                Notes = Strings(r, "notes"),
                 GamesRoot = Str(r, "games_root"),
                 SyncRoot = Str(r, "sync_root"),
                 LaunchBoxText = lb.ValueKind == JsonValueKind.Object ? Str(lb, "text") : "",
@@ -123,7 +156,16 @@ public sealed record ArcadeState
                 Shelf = List(r, "shelf", e => new ArcadeShelfEntry(Str(e, "key"), Str(e, "title"), (int)(Num(e, "year") ?? 0), Str(e, "platforms"), Strings(e, "games"))),
                 Games = List(r, "games", g => new ArcadeGame(Str(g, "id"), Str(g, "title"), (int?)Num(g, "year"), Str(g, "system"), Str(g, "path"),
                     (int)(Num(g, "discs") ?? 0), Strings(g, "ff"), NullStr(g, "boxart"), Num(g, "last_played"), Bool(g, "ready"))),
-                Systems = List(r, "systems", x => new ArcadeSystem(Str(x, "id"), Str(x, "name"), Str(x, "folder"), Strings(x, "exts"), NullStr(x, "core"), Str(x, "hint"), Str(x, "note"))),
+                Systems = List(r, "systems", x => new ArcadeSystem(Str(x, "id"), Str(x, "name"), Str(x, "folder"), Strings(x, "exts"), NullStr(x, "core"), Str(x, "hint"), Str(x, "note"))
+                {
+                    Emulator = Str(x, "emulator"),
+                    Preferred = Str(x, "preferred") is { Length: > 0 } pref ? pref : "auto",
+                    Emulators = List(x, "emulators", o => new ArcadeEmulator(Str(o, "id"), Str(o, "label"), Bool(o, "installed"), Bool(o, "bios_free"))),
+                    Bios = x.ValueKind == JsonValueKind.Object && x.TryGetProperty("bios", out var b) && b.ValueKind == JsonValueKind.Object
+                        ? new ArcadeBios(Str(b, "dir"), Bool(b, "required"), Bool(b, "ok"), Bool(b, "hle"), Str(b, "summary"),
+                            List(b, "files", f => new ArcadeBiosFile(Str(f, "name"), Str(f, "what"), (long)(Num(f, "size") ?? 0), Str(f, "md5"), Str(f, "state"), Str(f, "detail"))))
+                        : null,
+                }),
                 Last = NullStr(r, "last"),
             };
         }
@@ -163,5 +205,7 @@ public static class ArcadeText
     public const string Legal = "XivArcade never downloads, links to or helps find ROMs, disc images or BIOS files. It only reads folders you point it at. Use your own dumps of games you own.";
 
     public const string Help = "/arcade opens the library; /arcade <name> plays the closest match; /arcade last resumes; /arcade list; /arcade sync; /arcade setup; "
-        + "/arcade rescan; /arcade launchbox <folder>; /arcade import-saves <folder>; /arcade launch --dry-run <name or file>.";
+        + "/arcade rescan; /arcade launchbox <folder>; /arcade import-saves <folder>; /arcade launch --dry-run <name or file>; "
+        + "/arcade pad [on|off|auto] (the gamepad belongs to the arcade game while you play; hold Start+Select or press Esc to take it back); "
+        + "/arcade emulator [console|game choice]; /arcade bios; /arcade paths; /arcade games-folder <dir>; /arcade saves-folder <dir>.";
 }

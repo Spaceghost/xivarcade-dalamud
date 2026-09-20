@@ -128,11 +128,27 @@ Two IPC functions, no assembly reference needed:
 
 ## Known limits
 
-- **Controller:** a gamepad does not go through the agent's compositor; RetroArch and FFXIV both
-  read it, so your character reacts while you play in a panel. Use the keyboard for now.
-- PlayStation 2 only through the LRPS2 core; standalone PCSX2 is not wired up. PS1/PS2 cores want a
-  BIOS dumped from your own console.
-- The plugin assumes the default `~/.config` and `~/.local/share`.
+The first release's four limits, and where each stands (details in [docs/ARCADE.md](docs/ARCADE.md)).
+None of this has been seen working in the game yet.
+
+- **Controller: addressed, unverified in game.** While an arcade game's panel has the focus, a hook on
+  the game's gamepad poll hides the pad from FFXIV, with a banner for as long as it lasts. Hold
+  Start+Select for a second, press Esc or type `/arcade pad off` to take it back; it also lets go on
+  combat, cutscenes, zone changes, logout, when the game closes or its panel loses focus, and on
+  unload. If the hook cannot be installed, FFXIV is left alone and the window says so. It only ever
+  withholds your own input. What remains: whether RetroArch ignores the pad while *its* panel is not
+  focused is untested.
+- **PlayStation 2: standalone PCSX2** (Flatpak or native) is an option beside the LRPS2 core, and
+  DuckStation beside the PlayStation cores, with a preferred emulator per console or per game. Their
+  saves go into the synced tree through a generated profile; your own emulator settings are not
+  edited. PPSSPP and melonDS standalones are not wired up.
+- **BIOS: bring your own, without the guesswork.** Exact file names, sizes, MD5s and the folder, a
+  check that turns green when a correct dump appears, and a clear message for a wrong one. PlayStation
+  games can start without a BIOS on PCSX ReARMed ("no BIOS needed, lower compatibility").
+  PlayStation 2 always needs one. XivArcade never downloads, links to or helps find a BIOS.
+- **Paths:** `XDG_*` directories, Flatpak and native RetroArch locations, a custom games folder and a
+  custom saves folder are honoured, and the Wine-to-Linux mapping is derived instead of assuming `Z:`.
+  An existing setup is never moved unless you ask.
 
 ## Privacy and security
 

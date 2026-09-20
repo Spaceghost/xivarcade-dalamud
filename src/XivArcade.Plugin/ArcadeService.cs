@@ -36,6 +36,8 @@ public sealed class ArcadeService : IDisposable
     private int busy;
     private bool helperReady;
     private string lastMessage = "";
+    private string? configDir;
+    private volatile bool playingAlive;
 
     public ArcadeService(IFramework framework, IPluginLog log, Func<HostPaths> paths, HostLauncher host, Configuration config)
     {
@@ -48,6 +50,15 @@ public sealed class ArcadeService : IDisposable
     }
 
     public ArcadeState State => state;
+
+    /// <summary>A check the plugin itself contributes to the helper's list (the gamepad hook); null adds none.</summary>
+    public Func<ArcadeCheck?>? PluginCheck { get; set; }
+
+    /// <summary>The helper says a game is running and its process is still there (/proc/PID), so a killed helper cannot leave this true.</summary>
+    public bool Playing => state.PlayingTitle != null && playingAlive;
+
+    /// <summary>The window.open request of the last game started as a panel; null when it went another way.</summary>
+    public long? LastOpenRequest { get; private set; }
 
     /// <summary>The window is open: poll faster and watch the games folder.</summary>
     public bool Watching { get; set; }
@@ -67,7 +78,18 @@ public sealed class ArcadeService : IDisposable
     /// <summary>Where the helper lives on the Linux host, beside its own state.</summary>
     public string HelperPath => ConfigDir + "/xiv-arcade";
 
-    private string ConfigDir => paths().LinuxHome + "/.config/xiv-arcade";
+    /// <summary>$XDG_CONFIG_HOME/xiv-arcade when Wine handed that variable down, else ~/.config/xiv-arcade; an existing default setup stays put.</summary>
+    private string ConfigDir
+    {
+        get
+        {
+            if (configDir != null)
+                return configDir;
+            var p = paths();
+            var dir = p.ConfigDir(Environment.GetEnvironmentVariable("XDG_CONFIG_HOME"), File.Exists);
+            return p.LinuxHome.Length == 0 ? dir : configDir = dir; // not remembered until the home directory is known
+        }
+    }
 
     public string Run(ArcadeRequest request)
     {
@@ -112,7 +134,9 @@ public sealed class ArcadeService : IDisposable
                 var line = ArcadeCommands.Line(HelperPath, verb, args);
                 if (line == null)
                     return "error: that name or path cannot be passed to the host";
-                host.RunInCompositor(line);
+                var request = host.RunInCompositor(line);
+                if (launch)
+                    LastOpenRequest = request;
             }
             else if (!launch || config.PlayOnHostDesktop)
             {
@@ -167,7 +191,7 @@ public sealed class ArcadeService : IDisposable
         var now = Environment.TickCount64;
         if (Watching && now - lastRefresh > IdleRefreshMs)
             Refresh();
-        if (now - lastStatePoll < (Watching || now < fastUntil ? StatePollMs : IdleRefreshMs))
+        if (now - lastStatePoll < (Watching || now < fastUntil || state.PlayingTitle != null ? StatePollMs : IdleRefreshMs))
             return;
         lastStatePoll = now;
         var watchFolder = Watching && now - lastFolderPoll >= FolderPollMs;
@@ -195,6 +219,8 @@ public sealed class ArcadeService : IDisposable
                     var next = ArcadeState.Parse(File.ReadAllText(file));
                     if (next.Loaded)
                     {
+                        if (PluginCheck?.Invoke() is { } mine)
+                            next = next with { Checks = [.. next.Checks, mine] };
                         state = next;
                         if (next.Message.Length > 0 && next.Message != lastMessage)
                             _ = framework.RunOnFrameworkThread(() => Message?.Invoke(next.Message));
@@ -203,9 +229,14 @@ public sealed class ArcadeService : IDisposable
                 }
             }
 
+            var playing = state;
+            playingAlive = playing.PlayingTitle != null && (playing.PlayingPid == 0 || Directory.Exists(p.ToLocal("/proc/" + playing.PlayingPid)));
+
             if (!watchFolder || state.GamesRoot.Length == 0)
                 return;
-            var signature = FolderSignature(p.ToLocal(state.GamesRoot));
+
+            // the BIOS folders too: a dump dropped in turns its check green without anyone pressing Rescan
+            var signature = FolderSignature(p.ToLocal(state.GamesRoot)) + string.Concat(state.Watch.Select(d => "|" + FolderSignature(p.ToLocal(d))));
             var changed = folderSignature.Length > 0 && signature != folderSignature;
             folderSignature = signature;
             if (changed)

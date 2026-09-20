@@ -27,11 +27,14 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Configuration config = null!;
     private readonly ArcadeService arcade = null!;
     private readonly ArcadeWindow window = null!;
+    private readonly PadCaptureService pad = null!;
+    private (string Root, bool Derived)? wineRoot;
     private readonly ICallGateProvider<string, string>? search;
     private readonly ICallGateProvider<string, string>? launch;
     private bool commandRegistered;
 
-    public Plugin(IDalamudPluginInterface pluginInterface, IPluginLog log, IFramework framework, ICommandManager commands, IChatGui chat, ITextureProvider textures)
+    public Plugin(IDalamudPluginInterface pluginInterface, IPluginLog log, IFramework framework, ICommandManager commands, IChatGui chat, ITextureProvider textures,
+        IGameInteropProvider interop, ICondition condition, IClientState clientState, IKeyState keys)
     {
         this.pluginInterface = pluginInterface;
         this.log = log;
@@ -42,8 +45,12 @@ public sealed class Plugin : IDalamudPlugin
         try
         {
             config = pluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
-            arcade = new ArcadeService(framework, log, Paths, new HostLauncher(pluginInterface), config);
+            var host = new HostLauncher(pluginInterface);
+            arcade = new ArcadeService(framework, log, Paths, host, config);
             arcade.Message += OnArcadeMessage;
+            pad = new PadCaptureService(framework, interop, condition, clientState, keys, log, arcade, host, config);
+            pad.Changed += OnArcadeMessage;
+            arcade.PluginCheck = () => pad.Check;
             window = new ArcadeWindow(arcade, textures, Paths, config, () => pluginInterface.SavePluginConfig(config));
             windowSystem.AddWindow(window);
             pluginInterface.UiBuilder.Draw += DrawUi;
@@ -70,10 +77,12 @@ public sealed class Plugin : IDalamudPlugin
 
     private HostPaths Paths()
     {
+        // What Wine calls the Linux root is looked for once (the override, a drive that really holds /proc and /etc, \\?\unix), not assumed to be Z:.
+        var root = OperatingSystem.IsWindows() ? (wineRoot ??= HostPaths.DetectWineRoot(Directory.Exists, config.WineRootOverride)).Root : "";
         var home = config.HomeOverride;
         if (string.IsNullOrWhiteSpace(home))
-            home = HostPaths.GuessHome(Environment.GetEnvironmentVariable("HOME"), Environment.GetEnvironmentVariable("WINEHOMEDIR"), pluginInterface.ConfigDirectory.FullName);
-        return OperatingSystem.IsWindows() ? HostPaths.Wine(home) : HostPaths.Native(home);
+            home = HostPaths.GuessHome(Environment.GetEnvironmentVariable("HOME"), Environment.GetEnvironmentVariable("WINEHOMEDIR"), pluginInterface.ConfigDirectory.FullName, root.Length == 2 ? root : HostPaths.DefaultWineRoot);
+        return OperatingSystem.IsWindows() ? HostPaths.Wine(home, root) : HostPaths.Native(home);
     }
 
     private string LaunchById(string id)
@@ -92,6 +101,7 @@ public sealed class Plugin : IDalamudPlugin
         try
         {
             windowSystem.Draw();
+            pad.Draw();
 
             // "Always the in-game cursor": keep Dalamud from swapping it while over our window.
             GameCursor.Update("windows", window.IsOpen && window.IsHovered);
@@ -125,6 +135,14 @@ public sealed class Plugin : IDalamudPlugin
                 case ArcadeVerb.List:
                     PrintList();
                     return;
+                case ArcadeVerb.Pad:
+                    Print(pad.Command(request.Arg)[4..]);
+                    pluginInterface.SavePluginConfig(config);
+                    return;
+                case ArcadeVerb.Bios or ArcadeVerb.Paths:
+                case ArcadeVerb.Emulator when request.Arg.Length == 0:
+                    PrintSystems(request.Verb);
+                    break;
             }
 
             var result = arcade.Run(request);
@@ -133,6 +151,8 @@ public sealed class Plugin : IDalamudPlugin
                 ArcadeVerb.Sync => "syncing saves… " + arcade.State.Sync.Label,
                 ArcadeVerb.Setup => "checking folders, emulator and games…",
                 ArcadeVerb.Rescan => "rescanning your games folder…",
+                ArcadeVerb.Bios or ArcadeVerb.Paths => "looking again…",
+                ArcadeVerb.Emulator or ArcadeVerb.GamesFolder or ArcadeVerb.SavesFolder => "asked the host; the answer follows",
                 _ => "asked the host; the result follows",
             }
             : result);
@@ -160,6 +180,31 @@ public sealed class Plugin : IDalamudPlugin
         foreach (var group in state.Games.GroupBy(g => g.System))
             Print(state.SystemName(group.Key) + ": " + string.Join("; ", group.Select(g => g.Title + (g.Ready ? "" : " (core missing)"))));
         Print("saves: " + state.Sync.Label);
+    }
+
+    /// <summary>What the helper last reported, from the state already in memory; a fresh look is asked for right after.</summary>
+    private void PrintSystems(ArcadeVerb verb)
+    {
+        var state = arcade.State;
+        if (verb == ArcadeVerb.Paths)
+        {
+            Print($"games: {state.GamesRoot} · saves: {state.SyncRoot} · Linux root in Wine: {wineRoot?.Root ?? "(native)"}{(wineRoot is { Derived: false } ? " (assumed; set WineRootOverride if wrong)" : "")}");
+            foreach (var note in state.Notes)
+                Print(note);
+            return;
+        }
+
+        foreach (var s in state.Systems)
+        {
+            if (verb == ArcadeVerb.Emulator && s.Emulators.Count > 0)
+                Print($"{s.Name} ({s.Id}): {(s.Emulator.Length > 0 ? s.Emulator : "none installed")} · choices: auto, " + string.Join(", ", s.Emulators.Select(e => e.Id + (e.Installed ? "" : " (not installed)"))));
+            if (verb == ArcadeVerb.Bios && s.Bios is { } bios)
+            {
+                Print($"{s.Name}: {bios.Summary}");
+                foreach (var f in bios.Files.Where(f => f.State != "missing" || bios.Required))
+                    Print($"  [{(f.State == "ok" ? "x" : f.State == "wrong" ? "!" : " ")}] {f.Name} · {f.Size:N0} bytes{(f.Md5.Length > 0 ? " · MD5 " + f.Md5 : "")}{(f.Detail.Length > 0 ? " · " + f.Detail : "")}");
+            }
+        }
     }
 
     private void OnArcadeMessage(string message)
@@ -200,8 +245,16 @@ public sealed class Plugin : IDalamudPlugin
         pluginInterface.UiBuilder.OpenConfigUi -= OpenConfigUi;
         windowSystem.RemoveAllWindows();
         GameCursor.Release();
+        if (pad != null)
+        {
+            // first: the gamepad goes back to FFXIV and the hook comes off before anything else is torn down
+            pad.Changed -= OnArcadeMessage;
+            pad.Dispose();
+        }
+
         if (arcade != null)
         {
+            arcade.PluginCheck = null;
             arcade.Message -= OnArcadeMessage;
             arcade.Dispose();
         }

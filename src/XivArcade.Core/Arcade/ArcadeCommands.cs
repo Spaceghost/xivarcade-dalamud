@@ -15,6 +15,12 @@ public enum ArcadeVerb
     ImportSaves,
     DryRun,
     Help,
+    Pad,
+    Emulator,
+    Bios,
+    Paths,
+    GamesFolder,
+    SavesFolder,
 }
 
 /// <summary>What the player typed after /arcade.</summary>
@@ -42,6 +48,18 @@ public sealed record ArcadeRequest(ArcadeVerb Verb, string Arg = "")
                 return new ArcadeRequest(ArcadeVerb.Rescan);
             case "help" or "?" when rest.Length == 0:
                 return new ArcadeRequest(ArcadeVerb.Help);
+            case "pad" or "gamepad" or "controller" when rest.Length == 0 || rest.ToLowerInvariant() is "on" or "off" or "auto" or "status":
+                return new ArcadeRequest(ArcadeVerb.Pad, rest.ToLowerInvariant());
+            case "emulator" or "emulators":
+                return new ArcadeRequest(ArcadeVerb.Emulator, rest);
+            case "bios" when rest.Length == 0:
+                return new ArcadeRequest(ArcadeVerb.Bios);
+            case "paths" or "folders" when rest.Length == 0:
+                return new ArcadeRequest(ArcadeVerb.Paths);
+            case "games-folder" when rest.Length > 0:
+                return new ArcadeRequest(ArcadeVerb.GamesFolder, rest);
+            case "saves-folder" when rest.Length > 0:
+                return new ArcadeRequest(ArcadeVerb.SavesFolder, rest);
             case "launchbox":
                 return new ArcadeRequest(ArcadeVerb.LaunchBox, rest);
             case "import-saves" or "importsaves":
@@ -90,8 +108,21 @@ public static class ArcadeCommands
         ArcadeVerb.LaunchBox when request.Arg.Length > 0 => ("setup", ["--launchbox", request.Arg]),
         ArcadeVerb.ImportSaves when request.Arg.Length > 0 => ("import-saves", [request.Arg]),
         ArcadeVerb.DryRun when request.Arg.Length > 0 => ("launch", ["--dry-run", request.Arg]),
+        ArcadeVerb.Bios => ("bios", []),
+        ArcadeVerb.Paths => ("paths", []),
+        ArcadeVerb.GamesFolder when request.Arg.Length > 0 => ("setup", ["--games", request.Arg]),
+        ArcadeVerb.SavesFolder when request.Arg.Length > 0 => ("setup", ["--saves", request.Arg]),
+        ArcadeVerb.Emulator => ("emulator", EmulatorArgs(request.Arg)),
         _ => null,
     };
+
+    /// <summary>"ps2 pcsx2" → [ps2, pcsx2]; "final fantasy x pcsx2" → [final fantasy x, pcsx2]: the last word is the choice.</summary>
+    public static string[] EmulatorArgs(string arg)
+    {
+        var text = arg.Trim();
+        var cut = text.LastIndexOf(' ');
+        return text.Length == 0 ? [] : cut < 0 ? [text] : [text[..cut].Trim(), text[(cut + 1)..]];
+    }
 
     /// <summary>The helper line for a request, or null when the request is not one the helper runs.</summary>
     public static string? For(string helperPath, ArcadeRequest request, string? gameId = null)
