@@ -1,0 +1,16 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <AssemblyName>XivArcade</AssemblyName>
+    <RootNamespace>XivArcade.Plugin</RootNamespace>
+    <Version>0.1.0.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\XivArcade.Core\XivArcade.Core.csproj" />
+    <Compile Include="..\Shared\IpcContract.cs" Link="Shared\IpcContract.cs" />
+    <Compile Include="..\Shared\GameCursor.cs" Link="Shared\GameCursor.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The host helper travels inside the DLL; the plugin writes it to ~/.config/xiv-arcade/ on the host. -->
+    <EmbeddedResource Include="..\..\tools\xiv-arcade" LogicalName="xiv-arcade" />
+  </ItemGroup>
+</Project>

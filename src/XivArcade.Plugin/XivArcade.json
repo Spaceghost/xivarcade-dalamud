@@ -1,0 +1,27 @@
+{
+  "Author": "Johnneylee Jack Rollins",
+  "Name": "XivArcade",
+  "InternalName": "XivArcade",
+  "AssemblyVersion": "0.1.0.0",
+  "Punchline": "Your own classic games as game panels, with saves kept in step across your machines.",
+  "Description": "A library for the classic games you own, for FINAL FANTASY XIV running under Wine on Linux. /arcade lists the game files in folders you choose, Final Fantasy first, starts them in RetroArch on the Linux host, and shows them as world panels through ghostty-dalamud when it is installed. Every save and save state lives in one folder that Syncthing copies between your machines. XivArcade downloads no games, BIOS files or artwork: bring your own dumps of games you own. Not yet verified in game.",
+  "ApplicableVersion": "any",
+  "DalamudApiLevel": 15,
+  "IconUrl": "https://spacegho.st/mods/ffxiv/plugins/icons/xivarcade.png",
+  "ImageUrls": [
+    "https://spacegho.st/mods/ffxiv/plugins/icons/xivarcade-banner.png"
+  ],
+  "Tags": [
+    "emulation",
+    "retroarch",
+    "linux",
+    "saves",
+    "utility"
+  ],
+  "RepoUrl": "https://github.com/Spaceghost/xivarcade-dalamud",
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "LoadPriority": 0,
+  "CanUnloadAsync": false,
+  "AcceptsFeedback": false
+}
