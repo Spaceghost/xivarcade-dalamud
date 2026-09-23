@@ -10,6 +10,8 @@
 
 <img src="images/icon.png" width="96" height="96" align="right" alt="XivArcade icon">
 
+**[Site](https://spacegho.st/mods/ffxiv/xivarcade/) · [Install](https://spacegho.st/mods/ffxiv/plugins/) · [Vote on what's next](https://spacegho.st/mods/ffxiv/xivarcade/vote/) · [Screenshots](https://spacegho.st/mods/ffxiv/term/gallery/?mod=xivarcade) · [Changelog](CHANGELOG.md)**
+
 **Your own classic games inside FINAL FANTASY XIV, with every save kept in step across your machines.**
 
 XivArcade is a Dalamud plugin for the game running under Wine on Linux. `/arcade` lists the game
