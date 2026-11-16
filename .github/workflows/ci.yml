@@ -62,6 +62,12 @@ jobs:
         with:
           global-json-file: global.json
 
+      # global.json requires a patched SDK (CVE-2026-105544).
+      - name: Report selected .NET SDK
+        run: |
+          dotnet --version
+          dotnet --list-sdks
+
       - name: Check the plugin manifest
         run: tools/check-manifest.py
 

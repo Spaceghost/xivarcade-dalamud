@@ -52,6 +52,12 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
+
+      # global.json requires a patched SDK (CVE-2026-105544).
+      - name: Report selected .NET SDK
+        run: |
+          dotnet --version
+          dotnet --list-sdks
       - name: Restore
         run: for p in $PROJECTS; do dotnet restore "$p"; done
       - name: ${{ matrix.kind }}
